@@ -54,6 +54,11 @@
           <b id="rounds-val">5</b>
           <button id="rounds-plus" class="btn ghost small">+</button>
         </div>
+        <label class="check">
+          <input type="checkbox" id="replay-check">
+          Allow repeats (games can come back)
+        </label>
+        <p id="rounds-note" class="hint small"></p>
         <button id="btn-start" class="btn big primary">▶ Start game</button>
         <p id="lobby-hint" class="hint"></p>
       </div>
@@ -91,7 +96,7 @@
     <div id="play-wait" class="overlay hidden">
       <h2>✅ Score saved!</h2>
       <p>Your score: <b id="wait-score">0</b></p>
-      <p class="muted">Waiting for the other players…</p>
+      <p class="muted">Collecting results ....</p>
     </div>
   </section>
 
@@ -120,7 +125,8 @@
     <button id="btn-back-lobby" class="btn big primary hidden">Back to lobby</button>
     <p id="final-hint" class="hint"></p>
   </section>
-  
+  <button id="btn-leave-fab" class="btn ghost small leave-fab hidden">🚪 Leave room</button>
+
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>

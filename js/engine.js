@@ -104,13 +104,13 @@ const VFX = {
   },
 };
 
-/* ---------- Weighted game picker ----------
-   Every game starts with weight 1 (equal chance). When a game is picked it
-   drops to weight * PENALTY. Every other game recovers RECOVER per round (max 1).
-   Result with 5 games: the picked game goes from 20% to about 9%, then climbs back. */
+/* ---------- Game picker ----------
+   Repeats OFF (default): shuffle the pool, each game is played once.
+   Repeats ON: weighted picking. A picked game drops to PENALTY of its weight
+   (5 games: 20% becomes about 6%), and the others recover RECOVER per round. */
 const Picker = {
-  PENALTY: 0.4,
-  RECOVER: 0.15,
+  PENALTY: 0.25,
+  RECOVER: 0.1,
   pick(w) {
     const ids = Object.keys(w);
     let r = Math.random() * ids.reduce((s, k) => s + w[k], 0);
@@ -122,9 +122,9 @@ const Picker = {
       w[k] = k === chosen ? w[k] * Picker.PENALTY : Math.min(1, w[k] + Picker.RECOVER);
     });
   },
-  // Builds the whole game order up front, so every device agrees on it.
-  schedule(ids, rounds) {
+  schedule(ids, rounds, replay = false) {
     if (!ids.length) return [];
+    if (!replay) return BrawlBox.util.shuffle(ids).slice(0, rounds);
     const w = Object.fromEntries(ids.map(id => [id, 1]));
     const out = [];
     for (let i = 0; i < rounds; i++) {
@@ -168,7 +168,7 @@ const DB = (() => {
     get: cached,
     async getOnce(p) { return (await ref(p).once('value')).val(); },
     set: (p, v) => ref(p).set(v === undefined ? null : v),
-    update: (p, fn) => ref(p).transaction(fn),
+    update: (p, fn) => ref(p).transaction(fn).catch(e => console.warn('update retried:', e.message)),
     on(p, cb) {
       const r = ref(p);
       const handler = snap => { const v = snap.val(); live.set(p, v); cb(v); };

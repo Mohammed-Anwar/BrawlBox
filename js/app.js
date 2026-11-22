@@ -3,11 +3,13 @@
   const $ = id => document.getElementById(id);
   const MIN_PLAYERS = 2;
   const MAX_ROUNDS = 30;
-  
+
   // Intro (intro: 10): shows the next game's name and rule, with a countdown. Then the game starts.
   // Result (result: 5): shows that game's ranking, with each player's score and the stars they earned in this game.
   // Standings (standings: 10): shows the running star totals for all players. After the last game, the app goes to the final screen instead.
   const TIMES = { intro: 10, result: 5, standings: 10 };   // seconds
+  const GRACE = 3;                                         // seconds to let final scores arrive
+  const maxRounds = r => r.replay ? MAX_ROUNDS : Math.max(1, (r.pool || []).length);
   const STARS = [5, 4, 3, 2, 1];                           // 6th place and below get none
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const PALETTE = ['#ff4d8d', '#22d3ee', '#4ade80', '#ffd23f', '#a855f7', '#fb923c', '#38bdf8', '#f43f5e', '#84cc16', '#e879f9'];
@@ -29,6 +31,7 @@
 
   function showScreen(name) {
     document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === 'screen-' + name));
+    $('btn-leave-fab').classList.toggle('hidden', name === 'home');
   }
 
   /* ---------- HOME ---------- */
@@ -85,12 +88,16 @@
     homeError(msg);
   }
 
-  $('btn-leave').onclick = () => {
+  function leaveRoom() {
     const c = code, isHost = room?.hostId === uid;
+    if (!c) return;
+    if (!confirm(isHost ? 'Leave? As the leader, this closes the room for everyone.' : 'Leave this room?')) return;
     leaveLocal();                     // unsubscribe first so the listener doesn't react
     if (isHost) DB.set(`rooms/${c}`, null);
-    else if (c) DB.set(`rooms/${c}/players/${uid}`, null);
-  };
+    else DB.set(`rooms/${c}/players/${uid}`, null);
+  }
+  $('btn-leave').onclick = leaveRoom;
+  $('btn-leave-fab').onclick = leaveRoom;
 
   /* ---------- RENDER (called on every room change) ---------- */
   function render() {
@@ -139,6 +146,13 @@
     $('rounds-minus').classList.toggle('hidden', !isHost);
     $('rounds-plus').classList.toggle('hidden', !isHost);
     $('rounds-val').textContent = room.rounds;
+    $('rounds-minus').disabled = !isHost || room.rounds <= 1;
+    $('rounds-plus').disabled = !isHost || room.rounds >= maxRounds(room);
+    $('replay-check').checked = !!room.replay;
+    $('replay-check').disabled = !isHost;
+    $('rounds-note').textContent = room.replay
+      ? `Games can repeat. Up to ${MAX_ROUNDS} rounds.`
+      : `Each game is played once, so the maximum is ${pool.length} round${pool.length === 1 ? '' : 's'} (the games you picked).`;
 
     $('pool-list').innerHTML = BrawlBox.catalog.map(g => {
       const on = pool.includes(g.id);
@@ -160,31 +174,42 @@
     $('lobby-hint').textContent = hint;
   }
 
-  $('pool-list').addEventListener('change', () => {
+    $('pool-list').addEventListener('change', () => {
     if (!room || room.hostId !== uid) return;
     const pool = [...$('pool-list').querySelectorAll('input:checked')].map(i => i.dataset.id);
-    DB.set(`rooms/${code}/pool`, pool);
+    DB.update(`rooms/${code}`, cur => cur && {
+      ...cur, pool,
+      rounds: Math.min(cur.rounds, cur.replay ? MAX_ROUNDS : Math.max(1, pool.length)),
+    });
   });
 
   const setRounds = n => {
-    if (room?.hostId === uid) DB.set(`rooms/${code}/rounds`, Math.min(MAX_ROUNDS, Math.max(1, n)));
+    if (room?.hostId === uid) DB.set(`rooms/${code}/rounds`, Math.min(maxRounds(room), Math.max(1, n)));
   };
   $('rounds-minus').onclick = () => setRounds(room.rounds - 1);
   $('rounds-plus').onclick = () => setRounds(room.rounds + 1);
 
+  $('replay-check').onchange = e => {
+    if (room?.hostId !== uid) return;
+    const replay = e.target.checked;
+    DB.update(`rooms/${code}`, cur => cur && {
+      ...cur, replay,
+      rounds: Math.min(cur.rounds, replay ? MAX_ROUNDS : Math.max(1, (cur.pool || []).length)),
+    });
+  };
   $('btn-ready').onclick = () => {
     DB.set(`rooms/${code}/players/${uid}/ready`, !room.players[uid].ready);
   };
 
   $('btn-start').onclick = () => {
     if (!room || room.hostId !== uid) return;
-    const schedule = Picker.schedule(room.pool, room.rounds);
+    const schedule = Picker.schedule(room.pool, room.rounds, !!room.replay);
     const stars = Object.fromEntries(Object.keys(room.players).map(id => [id, 0]));
     const colors = BrawlBox.util.shuffle(PALETTE);
     const players = Object.fromEntries(
       Object.keys(room.players).map((id, i) => [id, { ...room.players[id], color: colors[i % colors.length] }])
     );
-    patchRoom({ phase: 'intro', gameIndex: 0, schedule, results: {}, stars, roundResult: null, phaseDur: TIMES.intro, players });
+    patchRoom({ phase: 'intro', gameIndex: 0, schedule, results: {}, stars, roundResult: null, phaseDur: TIMES.intro, players, live: null });
   };
 
     // Host-only writes that also reset the phase clock.
@@ -214,44 +239,47 @@
   }
 
   /* ---------- PLAYING ---------- */
+    function saveScore(gi, score, finished = false) {
+    if (!code) return;
+    DB.set(`rooms/${code}/live/${gi}/scores/${uid}`, Math.round(score)).catch(() => {});
+    if (finished) DB.set(`rooms/${code}/live/${gi}/finished/${uid}`, true).catch(() => {});
+  }
+
   async function startPlay(gi) {
     runIndex = gi;                               // set first so render() doesn't start it twice
     const entry = catalogById(room.schedule[gi]);
     const stage = $('play-stage');
     $('hud-name').textContent = `${entry.icon} ${entry.name}`;
-    $('hud-score').textContent = '0';
     $('hud-time').textContent = `${entry.time}s`;
     $('play-wait').classList.add('hidden');
     showScreen('play');
 
-    const saved = room.results?.[gi]?.[uid];
-    if (saved !== undefined) return showWait(saved);   // refreshed after finishing
+    const mine = room.live?.[gi]?.scores?.[uid] || 0;
+    $('hud-score').textContent = mine;
+    if (room.live?.[gi]?.finished?.[uid]) return showWait(mine);   // refreshed after finishing
+
+    // Register yourself on the board right away, even before your first point
+    if (room.live?.[gi]?.scores?.[uid] === undefined) saveScore(gi, 0);
 
     stage.innerHTML = '<p class="g-sub">Loading game…</p>';
     let run;
     try {
-        run = await runGame(entry, stage, {
+      run = await runGame(entry, stage, {
         onTick: s => { $('hud-time').textContent = `${s}s`; },
-        onScore: n => {
-          $('hud-score').textContent = n;
-          if (code) DB.set(`rooms/${code}/live/${gi}/scores/${uid}`, n).catch(() => {});
+        onScore: n => { $('hud-score').textContent = n; saveScore(gi, n); },
+        onFinish: score => {
+          if (runIndex !== gi) return;      // stopped by a phase change, not a real finish
+          saveScore(gi, score, true);
+          showWait(score);
         },
-        onFinish: score => { submit(gi, score); showWait(score); },
       }, { uid, code, gi, players: room.players });
     } catch (e) {
       stage.innerHTML = `<p class="g-rule">Oops! This game failed to load.</p><p class="g-sub">${esc(e.message)}</p>`;
-      submit(gi, 0);
+      saveScore(gi, 0, true);
       return;
     }
     if (runIndex !== gi) return run.finish();   // phase moved on while the file was loading
     activeRun = run;
-  }
-
-  function submit(gi, score) {
-    if (!code) return;
-    const r = DB.get(`rooms/${code}`);
-    if (!r || r.phase !== 'playing' || r.gameIndex !== gi) return;
-    DB.set(`rooms/${code}/results/${gi}/${uid}`, Math.round(score));
   }
 
   function showWait(score) {
@@ -323,11 +351,13 @@
   /* ---------- ROUND RESULT ---------- */
   function renderResult() {
     const gi = room.gameIndex, g = catalogById(room.schedule[gi]);
-    const rr = room.roundResult || { order: [], awarded: {} };
+    const rr = room.roundResult || {};
+    const order = rr.order || [];
+    const awarded = rr.awarded || {};
     $('result-name').textContent = `${g.icon} ${g.name}`;
-    $('result-list').innerHTML = rr.order.map((o, i) => {
+    $('result-list').innerHTML = order.map((o, i) => {
       const p = room.players[o.id];
-      const st = rr.awarded[o.id] || 0;
+      const st = awarded[o.id] || 0;
       return `<li class="rank r${i + 1}">
         <span class="pos">${i + 1}</span>
         <span class="rname">${esc(p ? p.name : '?')}${o.id === uid ? ' <small>(you)</small>' : ''}</span>
@@ -377,18 +407,20 @@
     const players = Object.fromEntries(
       Object.entries(room.players).map(([id, p]) => [id, { name: p.name, ready: id === room.hostId }])
     );
-    patchRoom({ phase: 'lobby', phaseDur: 0, gameIndex: 0, schedule: [], results: {}, stars: {}, roundResult: null, players });
+    patchRoom({ phase: 'lobby', phaseDur: 0, gameIndex: 0, schedule: [], results: {}, stars: {}, roundResult: null, players, live: null });
   };
 
   /* ---------- HOST TIMER (only the leader's tab drives phases) ---------- */
-  function finishRound(r) {
-    const gi = r.gameIndex, scores = r.results?.[gi] || {};
+    function finishRound(r) {
+    const gi = r.gameIndex;
+    const scores = r.live?.[gi]?.scores || {};
     const order = Object.keys(r.players)
       .map(id => ({ id, score: scores[id] ?? 0, submitted: id in scores }))
-      .sort((a, b) => (b.submitted - a.submitted) || (b.score - a.score));
+      .sort((a, b) => (b.score - a.score) || (b.submitted - a.submitted));
 
+    // Only players who actually scored points get stars
     const awarded = {};
-    order.filter(o => o.submitted).slice(0, STARS.length).forEach((o, i) => { awarded[o.id] = STARS[i]; });
+    order.filter(o => o.submitted && o.score > 0).slice(0, STARS.length).forEach((o, i) => { awarded[o.id] = STARS[i]; });
 
     const stars = { ...(r.stars || {}) };
     Object.keys(r.players).forEach(id => { stars[id] = (stars[id] || 0) + (awarded[id] || 0); });
@@ -398,15 +430,11 @@
 
   function hostTick(r) {
     const el = (Date.now() - r.phaseStart) / 1000;
-    const n = Object.keys(r.players).length;
 
     if (r.phase === 'intro' && el >= TIMES.intro) {
       return patchRoomIf('intro', r.phaseStart, { phase: 'playing', phaseDur: catalogById(r.schedule[r.gameIndex]).time });
     }
-    if (r.phase === 'playing') {
-      const subs = Object.keys(r.results?.[r.gameIndex] || {}).length;
-      if (subs >= n || el >= r.phaseDur + 1.5) return finishRound(r);
-    }
+    if (r.phase === 'playing' && el >= r.phaseDur + GRACE) return finishRound(r);
     if (r.phase === 'results' && el >= TIMES.result) {
       return patchRoomIf('results', r.phaseStart, { phase: 'standings', phaseDur: TIMES.standings });
     }
