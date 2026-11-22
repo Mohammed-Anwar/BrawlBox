@@ -5,13 +5,24 @@ const BrawlBox = {
   registerGame(id, def) { this.games[id] = def; },
 
   // Metadata for the lobby and timers. Game files only contain start().
+  // `time` is seconds, or a function of the players object (used by Auction House).
   catalog: [
-    { id: 'odd-one-out',  name: 'Odd One Out', icon: '🔍', rule: 'Tap the one that is different. Fast!', time: 30 },
-    { id: 'reaction',     name: 'Quick Draw',  icon: '⚡', rule: 'Wait for GREEN, then tap as fast as you can. 5 tries!', time: 30 },
-    { id: 'quick-math',   name: 'Brain Blitz', icon: '🧮', rule: 'Solve as many sums as you can!', time: 30 },
-    { id: 'stroop',       name: 'Color Clash', icon: '🎨', rule: 'Tap the INK color, not the word!', time: 25 },
-    { id: 'whack-a-mole', name: 'Mole Whack',  icon: '🔨', rule: 'Whack every mole that pops up!', time: 25 },
-    { id: 'tiles-claim', name: 'Tile Grab', icon: '🟦', rule: 'Tap any tile to take it, even from others!', time: 20 },
+    { id: 'odd-one-out',      name: 'Odd One Out',    icon: '🔍', rule: 'Tap the one that is different. Fast!', time: 30 },
+    { id: 'reaction',         name: 'Quick Draw',     icon: '⚡', rule: 'Wait for GREEN, then tap as fast as you can. 5 tries!', time: 30 },
+    { id: 'quick-math',       name: 'Brain Blitz',    icon: '🧮', rule: 'Solve as many sums as you can!', time: 30 },
+    { id: 'stroop',           name: 'Color Clash',    icon: '🎨', rule: 'Tap the INK color, not the word!', time: 25 },
+    { id: 'whack-a-mole',     name: 'Mole Whack',     icon: '🔨', rule: 'Whack every mole that pops up!', time: 25 },
+    { id: 'tiles-claim',      name: 'Tile Grab',      icon: '🟦', rule: 'Tap any tile to take it, even from others!', time: 20 },
+    { id: 'catch-falling',    name: 'Catch It',       icon: '🧺', rule: 'Tap the good items, avoid the bombs!', time: 25 },
+    { id: 'pattern-copy',     name: 'Pattern Copy',   icon: '🧩', rule: 'Watch the tiles light up, then tap them in order.', time: 30 },
+    { id: 'trivia-buzz',      name: 'Trivia Buzz',    icon: '💡', rule: 'Answer fast! Quicker correct answers score more.', time: 25 },
+    { id: 'balloon-pump',     name: 'Balloon Pump',   icon: '🎈', rule: 'Hold to inflate. Let go before it pops!', time: 25 },
+    { id: 'speed-typing',     name: 'Speed Typing',   icon: '⌨️', rule: 'Type the sentence as fast as you can!', time: 20 },
+    { id: 'precision-timing', name: 'Perfect Stop',   icon: '🎯', rule: 'Stop the marker inside the green zone!', time: 25 },
+    { id: 'stamina',          name: 'Sprint Stamina', icon: '🏃', rule: 'Tap to push! Pause to catch your breath.', time: 20 },
+    { id: 'bouncing-ball',    name: 'Bouncing Ball',  icon: '🏀', rule: 'Tap when the ball is low to keep it bouncing!', time: 25 },
+    { id: 'auction-house',    name: 'Auction House',  icon: '🏛️', rule: 'Bid your gold on items. Highest bid takes it!',
+      time: players => BrawlBox.auction.duration(Object.keys(players).length) },
   ],
 
   util: {
@@ -25,6 +36,19 @@ const BrawlBox = {
       return a;
     },
   },
+};
+
+// Resolves a catalog entry's time for a given set of players (seconds).
+BrawlBox.timeOf = (g, players) => typeof g.time === 'function' ? g.time(players || {}) : g.time;
+
+// Auction House timing. Milliseconds per item, seconds for the whole game.
+BrawlBox.auction = {
+  BID: 10000,      // bidding window per item
+  REVEAL: 3000,    // winner shown after bidding
+  FINAL: 9000,     // end-of-game haul animation
+  EXTRA_ITEMS: 3,  // items = players + this number
+  itemCount(n) { return Math.max(1, n) + this.EXTRA_ITEMS; },
+  duration(n) { return (this.itemCount(n) * (this.BID + this.REVEAL) + this.FINAL) / 1000; },
 };
 
 /* ---------- SFX (synthesized, no audio files) ---------- */
@@ -136,7 +160,13 @@ const Picker = {
   },
 };
 
-/* ---------- Room store ----------*/
+/* ---------- Room store (Firebase Realtime Database + Anonymous Auth) ----------
+   get(path)        sync: reads the live copy of a room you are watching with on()
+   getOnce(path)    async: fetches once (used before watching, e.g. create/join)
+   set(path, v)     writes (null deletes)
+   update(path, fn) transaction: fn(current) returns the new value, or undefined to abort
+   on(path, cb)     live listener, returns an unsubscribe function
+   ready()          resolves with this tab's Firebase user id */
 const DB = (() => {
   const live = new Map();     // watched path -> latest value
   let readyP = null;
@@ -178,7 +208,7 @@ const DB = (() => {
   };
 })();
 
-/* ---------- Game loader and runner ---------- */
+/* ---------- Game loader ---------- */
 function loadGame(id) {
   if (BrawlBox.games[id]) return Promise.resolve(BrawlBox.games[id]);
   return new Promise((resolve, reject) => {
@@ -192,16 +222,16 @@ function loadGame(id) {
   });
 }
 
-// Loads a game, runs it inside `stage`, and handles the timer and score.
-// handlers: { onTick(secondsLeft), onScore(n), onFinish(score) }
-/* Shared state for a game. In a room it is backed by Firebase under
-   rooms/<CODE>/live/<gameIndex>. In solo mode (debug.html) it is in memory. */
+/* ---------- Shared state for a game ----------
+   In a room it is backed by Firebase under rooms/<CODE>/live/<gameIndex>.
+   In solo mode (debug.html) it is in memory. */
 function makeChannel(ctx) {
   if (ctx) {
     const base = `rooms/${ctx.code}/live/${ctx.gi}`;
     return {
       uid: ctx.uid,
       players: ctx.players,
+      epoch: ctx.epoch,
       set: (key, val) => DB.set(`${base}/${key}`, val),
       on: (key, cb) => DB.on(`${base}/${key}`, cb),
     };
@@ -213,6 +243,7 @@ function makeChannel(ctx) {
   return {
     uid: 'me',
     players: { me: { name: 'You', color: '#ff4d8d' } },
+    epoch: Date.now(),
     set(key, val) {
       const ks = key.split('/').filter(Boolean);
       let o = root;
@@ -229,15 +260,18 @@ function makeChannel(ctx) {
   };
 }
 
-// Loads a game, runs it inside `stage`, and handles the timer and score.
-// handlers: { onTick(secondsLeft), onScore(n), onFinish(score) }
-// ctx (optional): { uid, code, gi, players } for games that share state in a room
+/* ---------- Game runner ----------
+   Loads a game, runs it inside `stage`, and handles the timer and score.
+   entry:    catalog entry (time may be a function; it is resolved here)
+   handlers: { onTick(secondsLeft), onScore(n), onFinish(score) }
+   ctx:      optional { uid, code, gi, players, epoch } for games that share room state */
 async function runGame(entry, stage, handlers = {}, ctx = null) {
   const def = await loadGame(entry.id);
   stage.innerHTML = '';
   let score = 0, done = false, timer = null;
   const stops = [];
   const startedAt = performance.now();
+  const limit = BrawlBox.timeOf(entry, ctx?.players);   // seconds, resolved for this player count
 
   const finish = () => {
     if (done) return;
@@ -248,7 +282,7 @@ async function runGame(entry, stage, handlers = {}, ctx = null) {
   };
 
   const api = {
-    timeLimit: entry.time,
+    timeLimit: limit,
     room: makeChannel(ctx),
     setScore(n) { score = n; handlers.onScore?.(n); },
     getScore: () => score,
@@ -259,7 +293,7 @@ async function runGame(entry, stage, handlers = {}, ctx = null) {
   };
 
   timer = setInterval(() => {
-    const left = entry.time - (performance.now() - startedAt) / 1000;
+    const left = limit - (performance.now() - startedAt) / 1000;
     handlers.onTick?.(Math.max(0, Math.ceil(left)));
     if (left <= 0) finish();
   }, 200);

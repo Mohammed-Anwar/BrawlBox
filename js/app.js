@@ -15,6 +15,7 @@
   const PALETTE = ['#ff4d8d', '#22d3ee', '#4ade80', '#ffd23f', '#a855f7', '#fb923c', '#38bdf8', '#f43f5e', '#84cc16', '#e879f9'];
 
   const catalogById = id => BrawlBox.catalog.find(g => g.id === id);
+  const gameTime = (r, gi) => BrawlBox.timeOf(catalogById(r.schedule[gi]), r.players);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const genCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
@@ -47,7 +48,7 @@
 
   $('code-input').addEventListener('input', e => { e.target.value = e.target.value.toUpperCase(); });
 
-    $('btn-create').onclick = async () => {
+  $('btn-create').onclick = async () => {
     const name = readName(); if (!name) return;
     let c;
     do { c = genCode(); } while (await DB.getOnce(`rooms/${c}`));
@@ -158,7 +159,7 @@
       const on = pool.includes(g.id);
       return `<label class="pool-item ${on ? 'on' : ''}">
         <input type="checkbox" data-id="${g.id}" ${on ? 'checked' : ''} ${isHost ? '' : 'disabled'}>
-        <span class="pi">${g.icon}</span><span class="pn">${esc(g.name)}</span><small>${g.time}s</small>
+        <span class="pi">${g.icon}</span><span class="pn">${esc(g.name)}</span><small>${BrawlBox.timeOf(g, room.players)}s</small>
       </label>`;
     }).join('');
 
@@ -174,7 +175,7 @@
     $('lobby-hint').textContent = hint;
   }
 
-    $('pool-list').addEventListener('change', () => {
+  $('pool-list').addEventListener('change', () => {
     if (!room || room.hostId !== uid) return;
     const pool = [...$('pool-list').querySelectorAll('input:checked')].map(i => i.dataset.id);
     DB.update(`rooms/${code}`, cur => cur && {
@@ -197,6 +198,7 @@
       rounds: Math.min(cur.rounds, replay ? MAX_ROUNDS : Math.max(1, (cur.pool || []).length)),
     });
   };
+
   $('btn-ready').onclick = () => {
     DB.set(`rooms/${code}/players/${uid}/ready`, !room.players[uid].ready);
   };
@@ -212,7 +214,7 @@
     patchRoom({ phase: 'intro', gameIndex: 0, schedule, results: {}, stars, roundResult: null, phaseDur: TIMES.intro, players, live: null });
   };
 
-    // Host-only writes that also reset the phase clock.
+  // Host-only writes that also reset the phase clock.
   function patchRoom(obj) {
     if (!code) return;
     DB.update(`rooms/${code}`, cur => cur && { ...cur, phaseStart: Date.now(), ...obj });
@@ -239,7 +241,7 @@
   }
 
   /* ---------- PLAYING ---------- */
-    function saveScore(gi, score, finished = false) {
+  function saveScore(gi, score, finished = false) {
     if (!code) return;
     DB.set(`rooms/${code}/live/${gi}/scores/${uid}`, Math.round(score)).catch(() => {});
     if (finished) DB.set(`rooms/${code}/live/${gi}/finished/${uid}`, true).catch(() => {});
@@ -247,7 +249,7 @@
 
   async function startPlay(gi) {
     runIndex = gi;                               // set first so render() doesn't start it twice
-    const entry = catalogById(room.schedule[gi]);
+    const entry = { ...catalogById(room.schedule[gi]), time: gameTime(room, gi) };
     const stage = $('play-stage');
     $('hud-name').textContent = `${entry.icon} ${entry.name}`;
     $('hud-time').textContent = `${entry.time}s`;
@@ -272,7 +274,7 @@
           saveScore(gi, score, true);
           showWait(score);
         },
-      }, { uid, code, gi, players: room.players });
+      }, { uid, code, gi, players: room.players, epoch: room.phaseStart });
     } catch (e) {
       stage.innerHTML = `<p class="g-rule">Oops! This game failed to load.</p><p class="g-sub">${esc(e.message)}</p>`;
       saveScore(gi, 0, true);
@@ -293,7 +295,7 @@
     runIndex = null;
     if (run) run.finish();
   }
-    
+
   /* ---------- LIVE SCOREBOARD (this game only, shown during play) ---------- */
   const ROW_STEP = 52;   // row height (44px) + gap (8px)
   const board = { gi: null, rows: new Map() };
@@ -411,7 +413,7 @@
   };
 
   /* ---------- HOST TIMER (only the leader's tab drives phases) ---------- */
-    function finishRound(r) {
+  function finishRound(r) {
     const gi = r.gameIndex;
     const scores = r.live?.[gi]?.scores || {};
     const order = Object.keys(r.players)
@@ -432,7 +434,7 @@
     const el = (Date.now() - r.phaseStart) / 1000;
 
     if (r.phase === 'intro' && el >= TIMES.intro) {
-      return patchRoomIf('intro', r.phaseStart, { phase: 'playing', phaseDur: catalogById(r.schedule[r.gameIndex]).time });
+      return patchRoomIf('intro', r.phaseStart, { phase: 'playing', phaseDur: gameTime(r, r.gameIndex) });
     }
     if (r.phase === 'playing' && el >= r.phaseDur + GRACE) return finishRound(r);
     if (r.phase === 'results' && el >= TIMES.result) {

@@ -2,19 +2,21 @@
   const $ = id => document.getElementById(id);
   let token = 0, run = null, current = null;
   VFX.init();
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   BrawlBox.catalog.forEach(g => {
     const b = document.createElement('button');
     b.className = 'menu-card';
     b.innerHTML = `<div class="mc-icon">${g.icon}</div><div class="mc-name">${g.name}</div>
-      <div class="mc-rule">${g.rule}</div><small>${g.time}s · games/${g.id}.js</small>`;
+      <div class="mc-rule">${g.rule}</div><small>${BrawlBox.timeOf(g, { me: {} })}s · games/${g.id}.js</small>`;
     b.onclick = () => play(g);
     $('menu-grid').appendChild(b);
   });
 
   const show = name => document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === 'screen-' + name));
 
-  async function play(entry) {
+    async function play(entry) {
+    entry = { ...entry, time: BrawlBox.timeOf(entry, { me: {} }) };
     const t = ++token;
     current = entry;
     if (run) { const r = run; run = null; r.finish(); }
@@ -25,6 +27,8 @@
     $('hud-time').textContent = `${entry.time}s`;
     $('play-stage').innerHTML = '<p class="g-sub">Loading…</p>';
     try {
+      await loadGame(entry.id);              // download first, so a stale click can't start a game
+      if (t !== token) return;               // user already picked another game or went back
       const r = await runGame(entry, $('play-stage'), {
         onTick: s => { if (t === token) $('hud-time').textContent = `${s}s`; },
         onScore: n => { if (t === token) $('hud-score').textContent = n; },
@@ -32,7 +36,7 @@
       });
       if (t !== token) r.finish(); else run = r;
     } catch (e) {
-      $('play-stage').innerHTML = `<p class="g-rule">Failed to load</p><p class="g-sub">${e.message}</p>`;
+      if (t === token) $('play-stage').innerHTML = `<p class="g-rule">Failed to load</p><p class="g-sub">${esc(e.message)}</p>`;
     }
   }
 
