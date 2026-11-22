@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BrawlBox</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="vfx"></canvas>
+
+  <!-- HOME -->
+  <section id="screen-home" class="screen active">
+    <div class="logo-emoji">🎲</div>
+    <h1>BrawlBox</h1>
+    <p class="muted">Mini-games. Real rivalry. Stars for the best.</p>
+    <div class="card">
+      <label class="field-label">Your name</label>
+      <input id="name-input" class="input" maxlength="16" placeholder="e.g. Sara">
+      <button id="btn-create" class="btn big primary" style="margin-top:18px">🏠 Create room</button>
+      <div class="divider"><span>or join one</span></div>
+      <div class="row">
+        <input id="code-input" class="input code-input" maxlength="4" placeholder="ABCD">
+        <button id="btn-join" class="btn">Join</button>
+      </div>
+      <p id="home-error" class="error"></p>
+    </div>
+  </section>
+
+  <!-- LOBBY (waiting room) -->
+  <section id="screen-lobby" class="screen">
+    <div class="topbar">
+      <div class="room-meta">
+        <span class="muted">Room code</span>
+        <span id="room-code" class="code"></span>
+      </div>
+      <span id="room-count" class="pill"></span>
+      <button id="btn-leave" class="btn ghost small">Leave</button>
+    </div>
+
+    <div class="lobby-grid">
+      <div class="card">
+        <h2>🧑‍🤝‍🧑 Players</h2>
+        <ul id="player-list" class="plist"></ul>
+        <button id="btn-ready" class="btn big success">I'm ready!</button>
+      </div>
+
+      <div class="card">
+        <h2>🎮 Games</h2>
+        <div id="pool-list" class="pool"></div>
+        <div id="rounds-controls" class="rounds">
+          <span>Rounds</span>
+          <button id="rounds-minus" class="btn ghost small">−</button>
+          <b id="rounds-val">5</b>
+          <button id="rounds-plus" class="btn ghost small">+</button>
+        </div>
+        <button id="btn-start" class="btn big primary">▶ Start game</button>
+        <p id="lobby-hint" class="hint"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- NEXT GAME INFO (20s) -->
+  <section id="screen-intro" class="screen">
+    <p id="intro-progress" class="eyebrow"></p>
+    <div id="intro-icon" class="intro-icon"></div>
+    <h1 id="intro-name"></h1>
+    <p id="intro-rule" class="rule"></p>
+    <div class="countdown-wrap">
+      <span class="muted">Starting in</span>
+      <div id="intro-countdown" class="countdown">20</div>
+    </div>
+  </section>
+
+  <!-- PLAYING -->
+  <section id="screen-play" class="screen">
+    <div class="hud">
+      <div id="hud-name" class="hud-name"></div>
+      <div id="hud-time" class="pill"></div>
+      <div class="hud-score">Score <b id="hud-score">0</b></div>
+    </div>
+    <div id="play-stage" class="play-stage"></div>
+    <div id="play-wait" class="overlay hidden">
+      <h2>✅ Score saved!</h2>
+      <p>Your score: <b id="wait-score">0</b></p>
+      <p class="muted">Waiting for the other players…</p>
+    </div>
+  </section>
+
+  <!-- ROUND RESULT (stars for this game) -->
+  <section id="screen-result" class="screen">
+    <p class="eyebrow">Round result</p>
+    <h1 id="result-name"></h1>
+    <ol id="result-list" class="ranklist"></ol>
+    <p class="muted">Next screen in <b id="result-countdown">8</b>s</p>
+  </section>
+
+  <!-- STANDINGS (after each round) -->
+  <section id="screen-standings" class="screen">
+    <p id="stand-progress" class="eyebrow"></p>
+    <h1>⭐ Leaderboard</h1>
+    <ol id="stand-list" class="ranklist"></ol>
+    <p class="muted">Next game in <b id="stand-countdown">10</b>s</p>
+  </section>
+
+  <!-- FINAL -->
+  <section id="screen-final" class="screen">
+    <p class="eyebrow">Game over</p>
+    <h1>🏆 Winner!</h1>
+    <div id="final-winner"></div>
+    <ol id="final-list" class="ranklist"></ol>
+    <button id="btn-back-lobby" class="btn big primary hidden">Back to lobby</button>
+    <p id="final-hint" class="hint"></p>
+  </section>
+
+  <script src="js/engine.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

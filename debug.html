@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BrawlBox · Debug</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="vfx"></canvas>
+
+  <section id="screen-menu" class="screen active">
+    <p class="eyebrow">🧪 Single-game test</p>
+    <h1>Pick a game</h1>
+    <div id="menu-grid" class="menu-grid"></div>
+    <a href="index.html" class="btn ghost">← Back to BrawlBox</a>
+  </section>
+
+  <section id="screen-play" class="screen">
+    <div class="hud">
+      <button id="btn-back" class="btn ghost small">← Games</button>
+      <div id="hud-name" class="hud-name"></div>
+      <div id="hud-time" class="pill"></div>
+      <div class="hud-score">Score <b id="hud-score">0</b></div>
+    </div>
+    <div id="play-stage" class="play-stage"></div>
+    <div id="over" class="overlay hidden">
+      <h2>Final score: <b id="over-score">0</b></h2>
+      <button id="btn-again" class="btn big primary">Play again</button>
+      <button id="btn-other" class="btn big">Other games</button>
+    </div>
+  </section>
+
+  <script src="js/engine.js"></script>
+  <script src="js/debug.js"></script>
+</body>
+</html>
