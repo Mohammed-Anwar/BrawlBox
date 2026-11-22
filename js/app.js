@@ -3,7 +3,11 @@
   const $ = id => document.getElementById(id);
   const MIN_PLAYERS = 2;
   const MAX_ROUNDS = 30;
-  const TIMES = { intro: 20, result: 8, standings: 10 };   // seconds
+  
+  // Intro (intro: 10): shows the next game's name and rule, with a countdown. Then the game starts.
+  // Result (result: 5): shows that game's ranking, with each player's score and the stars they earned in this game.
+  // Standings (standings: 10): shows the running star totals for all players. After the last game, the app goes to the final screen instead.
+  const TIMES = { intro: 10, result: 5, standings: 10 };   // seconds
   const STARS = [5, 4, 3, 2, 1];                           // 6th place and below get none
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const PALETTE = ['#ff4d8d', '#22d3ee', '#4ade80', '#ffd23f', '#a855f7', '#fb923c', '#38bdf8', '#f43f5e', '#84cc16', '#e879f9'];
@@ -14,10 +18,6 @@
 
   // Firebase user id for this tab (waits for anonymous sign-in).
   const uid = await DB.ready();
-  let code = sessionStorage.getItem('bb_room');
-
-  // Per-tab identity: each tab is a different player.
-  const uid = getUid();
   let code = sessionStorage.getItem('bb_room');
   let room = null, unsub = null;
   let activeRun = null, runIndex = null;
@@ -104,6 +104,7 @@
       case 'playing':
         if (runIndex !== room.gameIndex) { stopRun(); startPlay(room.gameIndex); }
         showScreen('play');
+        renderBoard();
         break;
       case 'results':   stopRun(); renderResult(); showScreen('result'); break;
       case 'standings': stopRun(); renderStandings(); showScreen('standings'); break;
@@ -229,9 +230,12 @@
     stage.innerHTML = '<p class="g-sub">Loading game…</p>';
     let run;
     try {
-            run = await runGame(entry, stage, {
+        run = await runGame(entry, stage, {
         onTick: s => { $('hud-time').textContent = `${s}s`; },
-        onScore: n => { $('hud-score').textContent = n; },
+        onScore: n => {
+          $('hud-score').textContent = n;
+          if (code) DB.set(`rooms/${code}/live/${gi}/scores/${uid}`, n).catch(() => {});
+        },
         onFinish: score => { submit(gi, score); showWait(score); },
       }, { uid, code, gi, players: room.players });
     } catch (e) {
@@ -260,6 +264,60 @@
     activeRun = null;
     runIndex = null;
     if (run) run.finish();
+  }
+    
+  /* ---------- LIVE SCOREBOARD (this game only, shown during play) ---------- */
+  const ROW_STEP = 52;   // row height (44px) + gap (8px)
+  const board = { gi: null, rows: new Map() };
+
+  function renderBoard() {
+    const gi = room.gameIndex;
+    const scores = room.live?.[gi]?.scores || {};
+    const box = $('live-list');
+
+    if (board.gi !== gi) {          // new game: start with an empty board
+      box.innerHTML = '';
+      board.rows.clear();
+      board.gi = gi;
+    }
+
+    const ids = Object.keys(room.players).sort((a, b) =>
+      (scores[b] || 0) - (scores[a] || 0) || room.players[a].name.localeCompare(room.players[b].name));
+
+    // Remove rows for players who left
+    for (const [id, row] of board.rows) {
+      if (!room.players[id]) { row.remove(); board.rows.delete(id); }
+    }
+
+    ids.forEach((id, i) => {
+      let row = board.rows.get(id);
+      if (!row) {
+        row = document.createElement('div');
+        row.className = 'live-row';
+        row.innerHTML = `<span class="lr-dot"></span><span class="lr-name"></span><b class="lr-score">0</b>`;
+        row.querySelector('.lr-dot').style.background = room.players[id].color || '#cccccc';
+        row.querySelector('.lr-name').textContent = room.players[id].name + (id === uid ? ' (you)' : '');
+        row.dataset.score = '0';
+        box.appendChild(row);
+        board.rows.set(id, row);
+      }
+
+      // Slide into position (CSS transition animates the move)
+      row.style.transform = `translateY(${i * ROW_STEP}px)`;
+      row.classList.toggle('lead', i === 0 && (scores[id] || 0) > 0);
+
+      // Pop the number when it goes up
+      const s = scores[id] || 0;
+      const prev = Number(row.dataset.score);
+      if (s !== prev) {
+        const el = row.querySelector('.lr-score');
+        el.textContent = s;
+        if (s > prev) { el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
+        row.dataset.score = s;
+      }
+    });
+
+    box.style.height = Math.max(0, ids.length * ROW_STEP - 8) + 'px';
   }
 
   /* ---------- ROUND RESULT ---------- */

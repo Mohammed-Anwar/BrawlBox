@@ -68,18 +68,26 @@
     <p id="intro-rule" class="rule"></p>
     <div class="countdown-wrap">
       <span class="muted">Starting in</span>
-      <div id="intro-countdown" class="countdown">20</div>
+      <div id="intro-countdown" class="countdown">10</div>
     </div>
   </section>
 
   <!-- PLAYING -->
   <section id="screen-play" class="screen">
-    <div class="hud">
-      <div id="hud-name" class="hud-name"></div>
-      <div id="hud-time" class="pill"></div>
-      <div class="hud-score">Score <b id="hud-score">0</b></div>
+    <div class="play-layout">
+      <div class="play-main">
+        <div class="hud">
+          <div id="hud-name" class="hud-name"></div>
+          <div id="hud-time" class="pill"></div>
+          <div class="hud-score">Score <b id="hud-score">0</b></div>
+        </div>
+        <div id="play-stage" class="play-stage"></div>
+      </div>
+      <aside class="live-board">
+        <h3>📊 This game</h3>
+        <div id="live-list" class="live-list"></div>
+      </aside>
     </div>
-    <div id="play-stage" class="play-stage"></div>
     <div id="play-wait" class="overlay hidden">
       <h2>✅ Score saved!</h2>
       <p>Your score: <b id="wait-score">0</b></p>
