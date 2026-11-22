@@ -11,6 +11,7 @@ const BrawlBox = {
     { id: 'quick-math',   name: 'Brain Blitz', icon: '🧮', rule: 'Solve as many sums as you can!', time: 30 },
     { id: 'stroop',       name: 'Color Clash', icon: '🎨', rule: 'Tap the INK color, not the word!', time: 25 },
     { id: 'whack-a-mole', name: 'Mole Whack',  icon: '🔨', rule: 'Whack every mole that pops up!', time: 25 },
+    { id: 'tiles-claim', name: 'Tile Grab', icon: '🟦', rule: 'Tap any tile to take it, even from others!', time: 20 },
   ],
 
   util: {
@@ -135,47 +136,44 @@ const Picker = {
   },
 };
 
-/* ---------- Room store ----------
-   Same API a Firebase version will have: get / set / update / on.
-   Writes go to localStorage, and other tabs get a "storage" event. */
+/* ---------- Room store ----------*/
 const DB = (() => {
-  const KEY = 'brawlbox_db';
-  const listeners = new Map();
-  const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } };
-  const write = db => localStorage.setItem(KEY, JSON.stringify(db));
-  const keys = path => path.split('/').filter(Boolean);
-  const getIn = (obj, path) => keys(path).reduce((o, k) => (o == null ? undefined : o[k]), obj);
-  const setIn = (obj, path, value) => {
-    const ks = keys(path);
-    let o = obj;
-    ks.slice(0, -1).forEach(k => {
-      if (typeof o[k] !== 'object' || o[k] === null) o[k] = {};
-      o = o[k];
+  const live = new Map();     // watched path -> latest value
+  let readyP = null;
+
+  const init = async () => {
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    const auth = firebase.auth();
+    // SESSION: each tab gets its own anonymous player, and refresh keeps it.
+    await auth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
+    const user = await new Promise(res => {
+      const off = auth.onAuthStateChanged(u => { off(); res(u); });
     });
-    const last = ks[ks.length - 1];
-    if (value === null || value === undefined) delete o[last]; else o[last] = value;
-    return obj;
+    return user ? user.uid : (await auth.signInAnonymously()).user.uid;
   };
-  const notify = () => {
-    const db = read();
-    listeners.forEach((fns, path) => { const v = getIn(db, path); fns.forEach(fn => fn(v)); });
+
+  const keys = p => p.split('/').filter(Boolean);
+  const getIn = (obj, p) => keys(p).reduce((o, k) => (o == null ? undefined : o[k]), obj);
+  const ref = p => firebase.database().ref(p);
+
+  const cached = p => {
+    for (const [root, val] of live) {
+      if (p === root || p.startsWith(root + '/')) return getIn(val, p.slice(root.length));
+    }
+    return undefined;
   };
-  window.addEventListener('storage', e => { if (e.key === KEY) notify(); });
 
   return {
-    get: path => getIn(read(), path),
-    set(path, value) { write(setIn(read(), path, value)); notify(); },
-    update(path, fn) {
-      const db = read();
-      const next = fn(getIn(db, path));
-      write(setIn(db, path, next));
-      notify();
-    },
-    on(path, fn) {
-      if (!listeners.has(path)) listeners.set(path, new Set());
-      listeners.get(path).add(fn);
-      fn(getIn(read(), path));
-      return () => listeners.get(path)?.delete(fn);
+    ready: () => (readyP ||= init()),
+    get: cached,
+    async getOnce(p) { return (await ref(p).once('value')).val(); },
+    set: (p, v) => ref(p).set(v === undefined ? null : v),
+    update: (p, fn) => ref(p).transaction(fn),
+    on(p, cb) {
+      const r = ref(p);
+      const handler = snap => { const v = snap.val(); live.set(p, v); cb(v); };
+      r.on('value', handler);
+      return () => { r.off('value', handler); live.delete(p); };
     },
   };
 })();
@@ -196,7 +194,45 @@ function loadGame(id) {
 
 // Loads a game, runs it inside `stage`, and handles the timer and score.
 // handlers: { onTick(secondsLeft), onScore(n), onFinish(score) }
-async function runGame(entry, stage, handlers = {}) {
+/* Shared state for a game. In a room it is backed by Firebase under
+   rooms/<CODE>/live/<gameIndex>. In solo mode (debug.html) it is in memory. */
+function makeChannel(ctx) {
+  if (ctx) {
+    const base = `rooms/${ctx.code}/live/${ctx.gi}`;
+    return {
+      uid: ctx.uid,
+      players: ctx.players,
+      set: (key, val) => DB.set(`${base}/${key}`, val),
+      on: (key, cb) => DB.on(`${base}/${key}`, cb),
+    };
+  }
+  const root = {};
+  const subs = [];
+  const read = key => key.split('/').filter(Boolean).reduce((o, k) => (o == null ? undefined : o[k]), root);
+  const notify = () => subs.forEach(s => s.cb(read(s.key)));
+  return {
+    uid: 'me',
+    players: { me: { name: 'You', color: '#ff4d8d' } },
+    set(key, val) {
+      const ks = key.split('/').filter(Boolean);
+      let o = root;
+      ks.slice(0, -1).forEach(k => { o[k] = o[k] || {}; o = o[k]; });
+      o[ks[ks.length - 1]] = val;
+      notify();
+    },
+    on(key, cb) {
+      const sub = { key, cb };
+      subs.push(sub);
+      cb(read(key));
+      return () => { subs.splice(subs.indexOf(sub), 1); };
+    },
+  };
+}
+
+// Loads a game, runs it inside `stage`, and handles the timer and score.
+// handlers: { onTick(secondsLeft), onScore(n), onFinish(score) }
+// ctx (optional): { uid, code, gi, players } for games that share state in a room
+async function runGame(entry, stage, handlers = {}, ctx = null) {
   const def = await loadGame(entry.id);
   stage.innerHTML = '';
   let score = 0, done = false, timer = null;
@@ -213,6 +249,7 @@ async function runGame(entry, stage, handlers = {}) {
 
   const api = {
     timeLimit: entry.time,
+    room: makeChannel(ctx),
     setScore(n) { score = n; handlers.onScore?.(n); },
     getScore: () => score,
     finish,

@@ -1,20 +1,20 @@
 /* BrawlBox app: room flow, phases, host timer, scoring and stars. */
-(() => {
+(async () => {
   const $ = id => document.getElementById(id);
   const MIN_PLAYERS = 2;
   const MAX_ROUNDS = 30;
   const TIMES = { intro: 20, result: 8, standings: 10 };   // seconds
   const STARS = [5, 4, 3, 2, 1];                           // 6th place and below get none
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const PALETTE = ['#ff4d8d', '#22d3ee', '#4ade80', '#ffd23f', '#a855f7', '#fb923c', '#38bdf8', '#f43f5e', '#84cc16', '#e879f9'];
 
   const catalogById = id => BrawlBox.catalog.find(g => g.id === id);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const genCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
-  const getUid = () => {
-    let u = sessionStorage.getItem('bb_uid');
-    if (!u) { u = Math.random().toString(36).slice(2, 10); sessionStorage.setItem('bb_uid', u); }
-    return u;
-  };
+
+  // Firebase user id for this tab (waits for anonymous sign-in).
+  const uid = await DB.ready();
+  let code = sessionStorage.getItem('bb_room');
 
   // Per-tab identity: each tab is a different player.
   const uid = getUid();
@@ -44,11 +44,11 @@
 
   $('code-input').addEventListener('input', e => { e.target.value = e.target.value.toUpperCase(); });
 
-  $('btn-create').onclick = () => {
+    $('btn-create').onclick = async () => {
     const name = readName(); if (!name) return;
     let c;
-    do { c = genCode(); } while (DB.get(`rooms/${c}`));
-    DB.set(`rooms/${c}`, {
+    do { c = genCode(); } while (await DB.getOnce(`rooms/${c}`));
+    await DB.set(`rooms/${c}`, {
       hostId: uid, phase: 'lobby', phaseStart: Date.now(), phaseDur: 0,
       gameIndex: 0, rounds: 5, pool: BrawlBox.catalog.map(g => g.id),
       schedule: [], results: {}, stars: {}, roundResult: null,
@@ -57,14 +57,14 @@
     enterRoom(c);
   };
 
-  $('btn-join').onclick = () => {
+  $('btn-join').onclick = async () => {
     const name = readName(); if (!name) return;
     const c = $('code-input').value.trim().toUpperCase();
-    const r = c && DB.get(`rooms/${c}`);
+    const r = c && await DB.getOnce(`rooms/${c}`);
     if (!r) return homeError('Room not found. Check the code.');
     const mine = r.players?.[uid];
     if (r.phase !== 'lobby' && !mine) return homeError('That game already started.');
-    DB.set(`rooms/${c}/players/${uid}`, { name, ready: mine?.ready || false });
+    await DB.set(`rooms/${c}/players/${uid}`, { name, ready: mine?.ready || false });
     enterRoom(c);
   };
 
@@ -179,13 +179,27 @@
     if (!room || room.hostId !== uid) return;
     const schedule = Picker.schedule(room.pool, room.rounds);
     const stars = Object.fromEntries(Object.keys(room.players).map(id => [id, 0]));
-    patchRoom({ phase: 'intro', gameIndex: 0, schedule, results: {}, stars, roundResult: null, phaseDur: TIMES.intro });
+    const colors = BrawlBox.util.shuffle(PALETTE);
+    const players = Object.fromEntries(
+      Object.keys(room.players).map((id, i) => [id, { ...room.players[id], color: colors[i % colors.length] }])
+    );
+    patchRoom({ phase: 'intro', gameIndex: 0, schedule, results: {}, stars, roundResult: null, phaseDur: TIMES.intro, players });
   };
 
-  // Host-only writes that also reset the phase clock.
+    // Host-only writes that also reset the phase clock.
   function patchRoom(obj) {
     if (!code) return;
     DB.update(`rooms/${code}`, cur => cur && { ...cur, phaseStart: Date.now(), ...obj });
+  }
+
+  // Only applies if the room is still in the phase the host saw. This stops
+  // the 250ms timer from applying the same change twice (which would skip a game).
+  function patchRoomIf(phase, phaseStart, obj) {
+    if (!code) return;
+    DB.update(`rooms/${code}`, cur =>
+      (cur && cur.phase === phase && cur.phaseStart === phaseStart)
+        ? { ...cur, phaseStart: Date.now(), ...obj }
+        : undefined);
   }
 
   /* ---------- INTRO (next game info) ---------- */
@@ -215,11 +229,11 @@
     stage.innerHTML = '<p class="g-sub">Loading game…</p>';
     let run;
     try {
-      run = await runGame(entry, stage, {
+            run = await runGame(entry, stage, {
         onTick: s => { $('hud-time').textContent = `${s}s`; },
         onScore: n => { $('hud-score').textContent = n; },
         onFinish: score => { submit(gi, score); showWait(score); },
-      });
+      }, { uid, code, gi, players: room.players });
     } catch (e) {
       stage.innerHTML = `<p class="g-rule">Oops! This game failed to load.</p><p class="g-sub">${esc(e.message)}</p>`;
       submit(gi, 0);
@@ -321,7 +335,7 @@
     const stars = { ...(r.stars || {}) };
     Object.keys(r.players).forEach(id => { stars[id] = (stars[id] || 0) + (awarded[id] || 0); });
 
-    patchRoom({ phase: 'results', phaseDur: TIMES.result, roundResult: { order, awarded }, stars });
+    patchRoomIf('playing', r.phaseStart, { phase: 'results', phaseDur: TIMES.result, roundResult: { order, awarded }, stars });
   }
 
   function hostTick(r) {
@@ -329,20 +343,20 @@
     const n = Object.keys(r.players).length;
 
     if (r.phase === 'intro' && el >= TIMES.intro) {
-      return patchRoom({ phase: 'playing', phaseDur: catalogById(r.schedule[r.gameIndex]).time });
+      return patchRoomIf('intro', r.phaseStart, { phase: 'playing', phaseDur: catalogById(r.schedule[r.gameIndex]).time });
     }
     if (r.phase === 'playing') {
       const subs = Object.keys(r.results?.[r.gameIndex] || {}).length;
       if (subs >= n || el >= r.phaseDur + 1.5) return finishRound(r);
     }
     if (r.phase === 'results' && el >= TIMES.result) {
-      return patchRoom({ phase: 'standings', phaseDur: TIMES.standings });
+      return patchRoomIf('results', r.phaseStart, { phase: 'standings', phaseDur: TIMES.standings });
     }
     if (r.phase === 'standings' && el >= TIMES.standings) {
       if (r.gameIndex + 1 < r.schedule.length) {
-        return patchRoom({ phase: 'intro', gameIndex: r.gameIndex + 1, phaseDur: TIMES.intro });
+        return patchRoomIf('standings', r.phaseStart, { phase: 'intro', gameIndex: r.gameIndex + 1, phaseDur: TIMES.intro });
       }
-      return patchRoom({ phase: 'final', phaseDur: 0 });
+      return patchRoomIf('standings', r.phaseStart, { phase: 'final', phaseDur: 0 });
     }
   }
 
@@ -364,7 +378,7 @@
 
   /* ---------- RESTORE SESSION (refresh keeps you in the room) ---------- */
   if (code) {
-    if (DB.get(`rooms/${code}`)) enterRoom(code);
+    if (await DB.getOnce(`rooms/${code}`)) enterRoom(code);
     else { code = null; sessionStorage.removeItem('bb_room'); }
   }
 })();
