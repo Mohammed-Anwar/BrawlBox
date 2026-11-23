@@ -10,7 +10,6 @@
   const TIMES = { intro: 10, result: 5, standings: 10 };   // seconds
   const GRACE = 3;                                         // seconds to let final scores arrive
   const maxRounds = r => r.replay ? MAX_ROUNDS : Math.max(1, (r.pool || []).length);
-  const STARS = [5, 4, 3, 2, 1];                           // 6th place and below get none
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const PALETTE = ['#ff4d8d', '#22d3ee', '#4ade80', '#ffd23f', '#a855f7', '#fb923c', '#38bdf8', '#f43f5e', '#84cc16', '#e879f9'];
 
@@ -26,7 +25,20 @@
   let activeRun = null, runIndex = null;
   const shownKeys = new Set();
   const once = (key, fn) => { if (!shownKeys.has(key)) { shownKeys.add(key); fn(); } };
-
+  
+  const MAX_STARS = 5;                                     // most stars a game can give out
+  // Stars for a place. Max stars = players (capped at 5), minus one per place down.
+  const starsFor = (rank, players) => Math.max(0, Math.min(MAX_STARS, players) - (rank - 1));
+  // Dense ranking: tied scores share a place, and the next score takes the next place.
+  function denseRanks(ids, valueOf) {
+    let rank = 0, prev = null;
+    return ids.map(id => {
+      const v = valueOf(id);
+      if (prev === null || v !== prev) rank++;
+      prev = v;
+      return rank;
+    });
+  }
   VFX.init();
   document.addEventListener('pointerdown', () => SFX.unlock(), { once: true });
 
@@ -351,17 +363,17 @@
   }
 
   /* ---------- ROUND RESULT ---------- */
-  function renderResult() {
+    function renderResult() {
     const gi = room.gameIndex, g = catalogById(room.schedule[gi]);
     const rr = room.roundResult || {};
     const order = rr.order || [];
     const awarded = rr.awarded || {};
     $('result-name').textContent = `${g.icon} ${g.name}`;
-    $('result-list').innerHTML = order.map((o, i) => {
+    $('result-list').innerHTML = order.map(o => {
       const p = room.players[o.id];
       const st = awarded[o.id] || 0;
-      return `<li class="rank r${i + 1}">
-        <span class="pos">${i + 1}</span>
+      return `<li class="rank r${Math.min(o.rank, 3)}">
+        <span class="pos">${o.rank}</span>
         <span class="rname">${esc(p ? p.name : '?')}${o.id === uid ? ' <small>(you)</small>' : ''}</span>
         <span class="rscore">${o.submitted ? o.score : '—'}</span>
         <span class="rstars">${st ? '⭐'.repeat(st) : ''}</span>
@@ -379,8 +391,10 @@
   function renderStandings() {
     const gi = room.gameIndex, stars = room.stars || {};
     $('stand-progress').textContent = `After game ${gi + 1} of ${room.schedule.length}`;
-    $('stand-list').innerHTML = sortedIds().map((id, i) => `<li class="rank r${i + 1}">
-      <span class="pos">${i + 1}</span>
+    const ids = sortedIds();
+    const ranks = denseRanks(ids, id => stars[id] || 0);
+    $('stand-list').innerHTML = ids.map((id, i) => `<li class="rank r${Math.min(ranks[i], 3)}">
+      <span class="pos">${ranks[i]}</span>
       <span class="rname">${esc(room.players[id].name)}${id === uid ? ' <small>(you)</small>' : ''}</span>
       <span class="rstars">⭐ ${stars[id] || 0}</span>
     </li>`).join('');
@@ -393,8 +407,10 @@
     const winners = ids.filter(id => (stars[id] || 0) === top);
     $('final-winner').innerHTML = `<div class="champ">${winners.map(id => esc(room.players[id].name)).join(' & ')}</div>
       <p class="muted">${top} ⭐ stars</p>`;
-    $('final-list').innerHTML = ids.map((id, i) => `<li class="rank r${i + 1}">
-      <span class="pos">${i + 1}</span>
+    const ids = sortedIds();
+    const ranks = denseRanks(ids, id => stars[id] || 0);
+      $('final-list').innerHTML = ids.map((id, i) => `<li class="rank r${Math.min(ranks[i], 3)}">
+      <span class="pos">${ranks[i]}</span>
       <span class="rname">${esc(room.players[id].name)}${id === uid ? ' <small>(you)</small>' : ''}</span>
       <span class="rstars">⭐ ${stars[id] || 0}</span>
     </li>`).join('');
@@ -413,19 +429,29 @@
   };
 
   /* ---------- HOST TIMER (only the leader's tab drives phases) ---------- */
-  function finishRound(r) {
+    function finishRound(r) {
     const gi = r.gameIndex;
     const scores = r.live?.[gi]?.scores || {};
-    const order = Object.keys(r.players)
+    const ids = Object.keys(r.players);
+
+    const sorted = ids
       .map(id => ({ id, score: scores[id] ?? 0, submitted: id in scores }))
       .sort((a, b) => (b.score - a.score) || (b.submitted - a.submitted));
 
-    // Only players who actually scored points get stars
+    const ranks = denseRanks(sorted, o => o.score);
+    const order = sorted.map((o, i) => ({ ...o, rank: ranks[i] }));
+
+    // Only players with points get stars
     const awarded = {};
-    order.filter(o => o.submitted && o.score > 0).slice(0, STARS.length).forEach((o, i) => { awarded[o.id] = STARS[i]; });
+    order.forEach(o => {
+      if (o.score > 0) {
+        const st = starsFor(o.rank, ids.length);
+        if (st > 0) awarded[o.id] = st;
+      }
+    });
 
     const stars = { ...(r.stars || {}) };
-    Object.keys(r.players).forEach(id => { stars[id] = (stars[id] || 0) + (awarded[id] || 0); });
+    ids.forEach(id => { stars[id] = (stars[id] || 0) + (awarded[id] || 0); });
 
     patchRoomIf('playing', r.phaseStart, { phase: 'results', phaseDur: TIMES.result, roundResult: { order, awarded }, stars });
   }

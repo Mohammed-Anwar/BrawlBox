@@ -4,7 +4,7 @@
   // Grid size (cols x rows) by player count: 2 players = index 0.
   // 6 players use 6x5 (assumption, same as 5 players).
   const SIZES = [
-    [4, 4], [5, 4], [5, 5], [6, 5], [6, 5], [6, 6], [7, 6], [7, 7],
+    [5, 5], [6, 5], [6, 5], [6, 6], [7, 6], [7, 7],
     [8, 7], [8, 8], [9, 8], [9, 9], [10, 9], [10, 10],
   ];
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

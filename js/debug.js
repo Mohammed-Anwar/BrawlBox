@@ -27,6 +27,7 @@
     $('hud-time').textContent = `${entry.time}s`;
     $('play-stage').innerHTML = '<p class="g-sub">Loading…</p>';
     try {
+      
       await loadGame(entry.id);              // download first, so a stale click can't start a game
       if (t !== token) return;               // user already picked another game or went back
       const r = await runGame(entry, $('play-stage'), {

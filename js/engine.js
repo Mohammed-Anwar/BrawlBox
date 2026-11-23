@@ -23,6 +23,13 @@ const BrawlBox = {
     { id: 'bouncing-ball',    name: 'Bouncing Ball',  icon: '🏀', rule: 'Tap when the ball is low to keep it bouncing!', time: 25 },
     { id: 'auction-house',    name: 'Auction House',  icon: '🏛️', rule: 'Bid your gold on items. Highest bid takes it!',
       time: players => BrawlBox.auction.duration(Object.keys(players).length) },
+    { id: 'orbit-tap',      name: 'Orbit Tap',     icon: '🌀', rule: 'Tap to flip the bar. Tap on a green arc to score!', time: 25 },
+    { id: 'lane-dash',      name: 'Lane Dash',     icon: '🏁', rule: 'Drag your car across 3 lanes. Dodge the traffic!', time: 30 },
+    { id: 'box-heist',      name: 'Box Heist',     icon: '💰', rule: 'Grab gems from the pile or steal from other boxes!', time: 25 },
+    { id: 'knight-hop',     name: 'Knight Hop',    icon: '♞',  rule: 'Jump like a chess knight. Never reuse a square!', time: 30 },
+    { id: 'word-chain',     name: 'Word Chain',    icon: '🔗', rule: 'Start your word with the last letter of the last word!', time: 40 },
+    { id: 'unique-answer',  name: 'Unique Answer', icon: '💬', rule: 'Name answers nobody else gave!', time: 30 },
+    { id: 'letter-grab',    name: 'Letter Grab',   icon: '🔤', rule: 'Drag across letters to spell words. Longer words, more points!', time: 45 },
   ],
 
   util: {
@@ -224,7 +231,9 @@ function loadGame(id) {
 
 /* ---------- Shared state for a game ----------
    In a room it is backed by Firebase under rooms/<CODE>/live/<gameIndex>.
-   In solo mode (debug.html) it is in memory. */
+   In solo mode (debug.html) it is in memory.
+   update(key, fn) is a transaction: fn gets the current value and returns the new one,
+   or undefined to abort. Resolves true if the write went through. */
 function makeChannel(ctx) {
   if (ctx) {
     const base = `rooms/${ctx.code}/live/${ctx.gi}`;
@@ -233,23 +242,30 @@ function makeChannel(ctx) {
       players: ctx.players,
       epoch: ctx.epoch,
       set: (key, val) => DB.set(`${base}/${key}`, val),
+      update: (key, fn) => DB.update(`${base}/${key}`, fn).then(r => !!(r && r.committed)),
       on: (key, cb) => DB.on(`${base}/${key}`, cb),
     };
   }
   const root = {};
   const subs = [];
   const read = key => key.split('/').filter(Boolean).reduce((o, k) => (o == null ? undefined : o[k]), root);
-  const notify = () => subs.forEach(s => s.cb(read(s.key)));
+  const write = (key, val) => {
+    const ks = key.split('/').filter(Boolean);
+    let o = root;
+    ks.slice(0, -1).forEach(k => { o[k] = o[k] || {}; o = o[k]; });
+    o[ks[ks.length - 1]] = val;
+    subs.forEach(s => s.cb(read(s.key)));
+  };
   return {
     uid: 'me',
     players: { me: { name: 'You', color: '#ff4d8d' } },
     epoch: Date.now(),
-    set(key, val) {
-      const ks = key.split('/').filter(Boolean);
-      let o = root;
-      ks.slice(0, -1).forEach(k => { o[k] = o[k] || {}; o = o[k]; });
-      o[ks[ks.length - 1]] = val;
-      notify();
+    set: (key, val) => { write(key, val); return Promise.resolve(); },
+    update: (key, fn) => {
+      const next = fn(read(key));
+      if (next === undefined) return Promise.resolve(false);
+      write(key, next);
+      return Promise.resolve(true);
     },
     on(key, cb) {
       const sub = { key, cb };
