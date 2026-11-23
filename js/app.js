@@ -407,7 +407,7 @@
     const winners = ids.filter(id => (stars[id] || 0) === top);
     $('final-winner').innerHTML = `<div class="champ">${winners.map(id => esc(room.players[id].name)).join(' & ')}</div>
       <p class="muted">${top} ⭐ stars</p>`;
-    const ids = sortedIds();
+    
     const ranks = denseRanks(ids, id => stars[id] || 0);
       $('final-list').innerHTML = ids.map((id, i) => `<li class="rank r${Math.min(ranks[i], 3)}">
       <span class="pos">${ranks[i]}</span>
