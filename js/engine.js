@@ -30,6 +30,12 @@ const BrawlBox = {
     { id: 'word-chain',     name: 'Word Chain',    icon: '🔗', rule: 'Start your word with the last letter of the last word!', time: 40 },
     { id: 'unique-answer',  name: 'Unique Answer', icon: '💬', rule: 'Name answers nobody else gave!', time: 30 },
     { id: 'letter-grab',    name: 'Letter Grab',   icon: '🔤', rule: 'Drag across letters to spell words. Longer words, more points!', time: 45 },
+    
+    { id: 'red-light',    name: 'Red Light',     icon: '🚦', rule: 'Hold to run on GREEN. Let go on RED, or you are out!', time: 40 },
+    { id: 'tower-rush',   name: 'Tower Rush',    icon: '🪨', rule: 'Tap to drop rocks on your tower. Tallest tower wins!', time: 30 },
+    { id: 'box-stack',    name: 'Box Stack',     icon: '📦', rule: 'Drag falling boxes onto your tower. Build as high as you can!', time: 40 },
+    { id: 'memory-floor', name: 'Memory Floor',  icon: '🧠', rule: 'Memorize the lit tiles, then tap them. Get them all right!', time: 40 },
+    { id: 'star-maze',    name: 'Star Maze',     icon: '⭐', rule: 'Race through the maze and grab stars. Faster means more points!', time: 45 },
   ],
 
   util: {
@@ -205,7 +211,14 @@ const DB = (() => {
     get: cached,
     async getOnce(p) { return (await ref(p).once('value')).val(); },
     set: (p, v) => ref(p).set(v === undefined ? null : v),
-    update: (p, fn) => ref(p).transaction(fn).catch(e => console.warn('update retried:', e.message)),
+    // js/engine.js, inside DB, replace the update line:
+    update: (p, fn) => ref(p).transaction(fn).then(res => {
+      if (!res.committed) console.warn('update not committed:', p);
+      return res;
+    }).catch(e => {
+      console.error('DB update failed at', p, e.code || e.message);
+      return { committed: false };
+    }),
     on(p, cb) {
       const r = ref(p);
       const handler = snap => { const v = snap.val(); live.set(p, v); cb(v); };

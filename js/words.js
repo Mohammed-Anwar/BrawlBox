@@ -1,7 +1,9 @@
 /* Word lookups through the Datamuse API (free, no key needed).
-   Words.isWord(w)              -> Promise<boolean>, exact dictionary match
-   Words.category(rel, letter)  -> Promise<Set>, words in a category that start with a letter
-                                   e.g. Words.category('rel_spc=fruit', 'b')
+   Words.isWord(w)                -> Promise<boolean>, exact dictionary match
+   Words.category(rel, letter)    -> Promise<Set>, words in a category that start with a letter
+                                     e.g. Words.category('rel_spc=fruit', 'b')
+   Words.inCategory(rel, w)       -> Promise<boolean>, is this one word in the category?
+                                     e.g. Words.inCategory('rel_spc=fruit', 'banana')
    Results are cached per tab. Network errors reject and are not cached. */
 const Words = (() => {
   const BASE = 'https://api.datamuse.com/words';
@@ -41,6 +43,12 @@ const Words = (() => {
       const l = clean(letter);
       return remember(`${rel}|${l}`, () =>
         query(`${rel}&sp=${l}*&max=1000`).then(list => new Set(list.map(x => x.word))));
+    },
+    inCategory(rel, w) {
+      w = clean(w);
+      if (!/^[a-z]{2,}$/.test(w)) return Promise.resolve(false);
+      return remember(`${rel}|=${w}`, () =>
+        query(`${rel}&sp=${w}&max=1`).then(list => list.some(x => x.word === w)));
     },
   };
 })();
