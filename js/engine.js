@@ -27,9 +27,9 @@ const BrawlBox = {
     { id: 'lane-dash',      name: 'Lane Dash',     icon: '🏁', rule: 'Drag your car across 3 lanes. Dodge the traffic!', time: 30 },
     { id: 'box-heist',      name: 'Box Heist',     icon: '💰', rule: 'Grab gems from the pile or steal from other boxes!', time: 25 },
     { id: 'knight-hop',     name: 'Knight Hop',    icon: '♞',  rule: 'Jump like a chess knight. Never reuse a square!', time: 30 },
-    { id: 'word-chain',     name: 'Word Chain',    icon: '🔗', rule: 'Start your word with the last letter of the last word!', time: 40 },
-    { id: 'unique-answer',  name: 'Unique Answer', icon: '💬', rule: 'Name answers nobody else gave!', time: 30 },
-    { id: 'letter-grab',    name: 'Letter Grab',   icon: '🔤', rule: 'Drag across letters to spell words. Longer words, more points!', time: 45 },
+    //{ id: 'word-chain',     name: 'Word Chain',    icon: '🔗', rule: 'Start your word with the last letter of the last word!', time: 40 },
+    //{ id: 'unique-answer',  name: 'Unique Answer', icon: '💬', rule: 'Name answers nobody else gave!', time: 30 },
+    //{ id: 'letter-grab',    name: 'Letter Grab',   icon: '🔤', rule: 'Drag across letters to spell words. Longer words, more points!', time: 45 },
     
     { id: 'red-light',    name: 'Red Light',     icon: '🚦', rule: 'Hold to run on GREEN. Let go on RED, or you are out!', time: 40 },
     { id: 'tower-rush',   name: 'Tower Rush',    icon: '🪨', rule: 'Tap to drop rocks on your tower. Tallest tower wins!', time: 30 },
