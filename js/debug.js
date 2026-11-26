@@ -4,11 +4,12 @@
   VFX.init();
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  BrawlBox.catalog.forEach(g => {
+  BrawlBox.catalog.reverse().forEach(g => {
     const b = document.createElement('button');
     b.className = 'menu-card';
-    b.innerHTML = `<div class="mc-icon">${g.icon}</div><div class="mc-name">${g.name}</div>
-      <div class="mc-rule">${g.rule}</div><small>${BrawlBox.timeOf(g, { me: {} })}s · games/${g.id}.js</small>`;
+    b.innerHTML = `${BrawlBox.visual(g, BrawlBox.timeOf(g, { me: {} }))}
+      <div class="mc-name">${g.name}</div>
+      <div class="mc-rule">${g.rule}</div>`;
     b.onclick = () => play(g);
     $('menu-grid').appendChild(b);
   });

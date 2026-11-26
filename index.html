@@ -25,6 +25,7 @@
       </div>
       <p id="home-error" class="error"></p>
     </div>
+    <a href="debug.html" class="btn ghost big practice">🎮 Practice a game solo</a>
   </section>
 
   <!-- LOBBY (waiting room) -->
@@ -47,25 +48,25 @@
 
       <div class="card">
         <h2>🎮 Games</h2>
-        <div id="pool-list" class="pool"></div>
-        <div id="rounds-controls" class="rounds">
-          <span>Rounds</span>
-          <button id="rounds-minus" class="btn ghost small">−</button>
-          <b id="rounds-val">5</b>
-          <button id="rounds-plus" class="btn ghost small">+</button>
+        <div id="lobby-games" class="lobby-games"></div>
+        <button id="btn-pick" class="btn big">🎮 Choose games</button>
+
+        <div class="timers">
+          <p class="field-label">Screen timers (seconds, min 2)</p>
+          <div class="timer-row">
+            <label>Before game<input id="t-intro" class="num" type="number" min="2" max="60"></label>
+            <label>After game<input id="t-result" class="num" type="number" min="2" max="60"></label>
+            <label>Star scores<input id="t-standings" class="num" type="number" min="2" max="60"></label>
+          </div>
         </div>
-        <label class="check">
-          <input type="checkbox" id="replay-check">
-          Allow repeats (games can come back)
-        </label>
-        <p id="rounds-note" class="hint small"></p>
+
         <button id="btn-start" class="btn big primary">▶ Start game</button>
         <p id="lobby-hint" class="hint"></p>
       </div>
     </div>
   </section>
 
-  <!-- NEXT GAME INFO (20s) -->
+  <!-- NEXT GAME INFO -->
   <section id="screen-intro" class="screen">
     <p id="intro-progress" class="eyebrow"></p>
     <div id="intro-icon" class="intro-icon"></div>
@@ -96,11 +97,16 @@
     <div id="play-wait" class="overlay hidden">
       <h2>✅ Score saved!</h2>
       <p>Your score: <b id="wait-score">0</b></p>
-      <p class="muted">Collecting results ....</p>
+      <div class="collect">
+        <div class="spinner"></div>
+        <p class="collect-title">Collecting results<span class="dots"><i>.</i><i>.</i><i>.</i></span></p>
+        <p id="wait-count" class="muted"></p>
+        <div id="wait-pips" class="pips"></div>
+      </div>
     </div>
   </section>
 
-  <!-- ROUND RESULT (stars for this game) -->
+  <!-- ROUND RESULT -->
   <section id="screen-result" class="screen">
     <p class="eyebrow">Round result</p>
     <h1 id="result-name"></h1>
@@ -108,7 +114,7 @@
     <p class="muted">Next screen in <b id="result-countdown">8</b>s</p>
   </section>
 
-  <!-- STANDINGS (after each round) -->
+  <!-- STANDINGS -->
   <section id="screen-standings" class="screen">
     <p id="stand-progress" class="eyebrow"></p>
     <h1>⭐ Leaderboard</h1>
@@ -125,15 +131,56 @@
     <button id="btn-back-lobby" class="btn big primary hidden">Back to lobby</button>
     <p id="final-hint" class="hint"></p>
   </section>
+
   <button id="btn-leave-fab" class="btn ghost small leave-fab hidden">🚪 Leave room</button>
+  <button id="btn-sound" class="btn ghost small sound-fab">🔔 Timer sound: On</button>
+
+  <!-- GAME PICKER POPUP -->
+    <!-- GAME PICKER POPUP -->
+  <div id="picker" class="sheet hidden">
+    <div class="sheet-box">
+      <div class="sheet-head">
+        <h2>Choose games</h2>
+        <span id="picker-count" class="pill"></span>
+      </div>
+      <div id="picker-grid" class="picker-grid"></div>
+      <div class="sheet-foot">
+        <div class="sheet-tools">
+          <button id="picker-all" class="btn small ghost">Select all</button>
+          <button id="picker-none" class="btn small ghost">Clear</button>
+        </div>
+        <button id="picker-done" class="btn primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- START SHEET (rounds are set here) -->
+  <div id="start-sheet" class="sheet hidden">
+    <div class="sheet-box small-box">
+      <h2>Ready to start?</h2>
+      <p id="ss-games" class="ss-games"></p>
+      <label class="check"><input type="checkbox" id="ss-replay"> Allow repeats (games can come back)</label>
+      <div class="rounds">
+        <span>Rounds</span>
+        <button id="ss-minus" class="btn ghost small">−</button>
+        <b id="ss-rounds">5</b>
+        <button id="ss-plus" class="btn ghost small">+</button>
+      </div>
+      <p id="ss-note" class="hint small"></p>
+      <div class="sheet-foot">
+        <button id="ss-cancel" class="btn ghost">Back</button>
+        <button id="ss-go" class="btn primary">▶ Start</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-  
+
   <script src="js/firebase-config.js"></script>
   <script src="js/words.js"></script>
-  <script src="js/engine.js"></script>
-  <script src="js/app.js?v=2"></script>
+  <script src="js/engine.js?v=3"></script>
+  <script src="js/app.js?v=3"></script>
 </body>
 </html>

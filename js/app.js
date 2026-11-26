@@ -2,21 +2,36 @@
 (async () => {
   const $ = id => document.getElementById(id);
   const MIN_PLAYERS = 2;
-  const MAX_ROUNDS = 30;
+  const MAX_ROUNDS = 30;                                   // most rounds when repeats are allowed
 
-  // Intro (intro: 10): shows the next game's name and rule, with a countdown. Then the game starts.
-  // Result (result: 5): shows that game's ranking, with each player's score and the stars they earned in this game.
-  // Standings (standings: 10): shows the running star totals for all players. After the last game, the app goes to the final screen instead.
-  const TIMES = { intro: 10, result: 5, standings: 10 };   // seconds
+  // Screen timers in seconds. The leader sets them in the lobby (saved in the room).
+  const TIMES = { intro: 10, result: 5, standings: 10 };   // defaults
+  const MIN_TIMER = 2;                                     // shortest allowed screen timer
+  const MAX_TIMER = 60;                                    // longest allowed screen timer (keep in sync with max="60" in index.html)
+  const TIMER_INPUTS = { intro: 't-intro', result: 't-result', standings: 't-standings' };
+  const COUNT_EL = { intro: 'intro-countdown', results: 'result-countdown', standings: 'stand-countdown' };
   const GRACE = 3;                                         // seconds to let final scores arrive
-  const maxRounds = r => r.replay ? MAX_ROUNDS : Math.max(1, (r.pool || []).length);
+  const MAX_STARS = 5;                                     // most stars a game can give out
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const PALETTE = ['#ff4d8d', '#22d3ee', '#4ade80', '#ffd23f', '#a855f7', '#fb923c', '#38bdf8', '#f43f5e', '#84cc16', '#e879f9'];
 
+  const clampTimer = (v, fallback = MIN_TIMER) => {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) ? Math.min(MAX_TIMER, Math.max(MIN_TIMER, n)) : fallback;
+  };
+  const timerOf = (r, key) => clampTimer(r?.timers?.[key], TIMES[key]);
+  const poolOf = r => r?.pool || [];
+  // Rounds: at least one per picked game. Without repeats it is exactly the game count.
+   const roundBounds = (pool, replay) => ({
+    min: 1,
+    max: replay ? MAX_ROUNDS : Math.max(1, pool.length),
+  });
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const catalogById = id => BrawlBox.catalog.find(g => g.id === id);
   const gameTime = (r, gi) => BrawlBox.timeOf(catalogById(r.schedule[gi]), r.players);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const genCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+  const setUrgent = (el, sec) => el.classList.toggle('urgent', sec <= SFX.WARN_S);
 
   // Firebase user id for this tab (waits for anonymous sign-in).
   const uid = await DB.ready();
@@ -25,9 +40,8 @@
   let activeRun = null, runIndex = null;
   const shownKeys = new Set();
   const once = (key, fn) => { if (!shownKeys.has(key)) { shownKeys.add(key); fn(); } };
-  
-  const MAX_STARS = 5;                                     // most stars a game can give out
-  // Stars for a place. Max stars = players (capped at 5), minus one per place down.
+
+  // Stars for a place. Max stars = players (capped at MAX_STARS), minus one per place down.
   const starsFor = (rank, players) => Math.max(0, Math.min(MAX_STARS, players) - (rank - 1));
   // Dense ranking: tied scores share a place, and the next score takes the next place.
   function denseRanks(ids, valueOf) {
@@ -46,6 +60,7 @@
     document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === 'screen-' + name));
     $('btn-leave-fab').classList.toggle('hidden', name === 'home');
   }
+  const closeSheets = () => ['picker', 'start-sheet'].forEach(id => $(id).classList.add('hidden'));
 
   /* ---------- HOME ---------- */
   const nameInput = $('name-input');
@@ -66,7 +81,8 @@
     do { c = genCode(); } while (await DB.getOnce(`rooms/${c}`));
     await DB.set(`rooms/${c}`, {
       hostId: uid, phase: 'lobby', phaseStart: Date.now(), phaseDur: 0,
-      gameIndex: 0, rounds: 5, pool: BrawlBox.catalog.map(g => g.id),
+      gameIndex: 0, pool: BrawlBox.catalog.map(g => g.id), replay: false,
+      timers: { ...TIMES },
       schedule: [], results: {}, stars: {}, roundResult: null,
       players: { [uid]: { name, ready: true } }, createdAt: Date.now(),
     });
@@ -96,6 +112,7 @@
     if (unsub) { unsub(); unsub = null; }
     code = null; room = null;
     sessionStorage.removeItem('bb_room');
+    closeSheets();
     stopRun();
     showScreen('home');
     homeError(msg);
@@ -117,6 +134,7 @@
     if (!code) return;
     if (!room) return leaveLocal('That room was closed.');
     if (!room.players?.[uid] && room.hostId !== uid) return leaveLocal('You are no longer in that room.');
+    if (room.phase !== 'lobby') closeSheets();
 
     switch (room.phase) {
       case 'lobby':     stopRun(); renderLobby(); showScreen('lobby'); break;
@@ -133,17 +151,20 @@
   }
 
   /* ---------- LOBBY ---------- */
+  const allReady = () => Object.keys(room.players)
+    .filter(id => id !== room.hostId)
+    .every(id => room.players[id].ready);
+  const canStart = () => Object.keys(room.players).length >= MIN_PLAYERS && allReady() && poolOf(room).length > 0;
+
   function renderLobby() {
     shownKeys.clear();
     const isHost = room.hostId === uid;
     const me = room.players[uid];
     const ids = Object.keys(room.players);
-    const others = ids.filter(id => id !== room.hostId);
-    const pool = room.pool || [];
-    const allReady = others.every(id => room.players[id].ready);
+    const pool = poolOf(room);
 
     $('room-code').textContent = code;
-    $('room-count').textContent = `👥 ${ids.length} player${ids.length === 1 ? '' : 's'}`;
+    $('room-count').textContent = `👥 ${plural(ids.length, 'player')}`;
 
     $('player-list').innerHTML = ids.map(id => {
       const p = room.players[id];
@@ -155,76 +176,131 @@
 
     $('btn-ready').className = 'btn big ' + (me.ready ? 'ghost' : 'success') + (isHost ? ' hidden' : '');
     $('btn-ready').textContent = me.ready ? 'Cancel ready' : "I'm ready!";
+    $('btn-ready').onclick = () => {
+      if (!room || !room.players?.[uid]) return;
+      DB.set(`rooms/${code}/players/${uid}/ready`, !room.players[uid].ready);
+    };
+
+    $('lobby-games').innerHTML = pool.length
+      ? pool.map(id => `<span class="mini">${catalogById(id)?.icon || '❔'}</span>`).join('') +
+        ` <small class="muted">${plural(pool.length, 'game')} picked</small>`
+      : '<small class="muted">No games picked yet</small>';
+    $('btn-pick').classList.toggle('hidden', !isHost);
+
+    Object.entries(TIMER_INPUTS).forEach(([key, id]) => {
+      const el = $(id);
+      el.disabled = !isHost;
+      if (document.activeElement !== el) el.value = timerOf(room, key);   // don't overwrite while typing
+    });
+
     $('btn-start').classList.toggle('hidden', !isHost);
-    $('rounds-minus').classList.toggle('hidden', !isHost);
-    $('rounds-plus').classList.toggle('hidden', !isHost);
-    $('rounds-val').textContent = room.rounds;
-    $('rounds-minus').disabled = !isHost || room.rounds <= 1;
-    $('rounds-plus').disabled = !isHost || room.rounds >= maxRounds(room);
-    $('replay-check').checked = !!room.replay;
-    $('replay-check').disabled = !isHost;
-    $('rounds-note').textContent = room.replay
-      ? `Games can repeat. Up to ${MAX_ROUNDS} rounds.`
-      : `Each game is played once, so the maximum is ${pool.length} round${pool.length === 1 ? '' : 's'} (the games you picked).`;
-
-    $('pool-list').innerHTML = BrawlBox.catalog.map(g => {
-      const on = pool.includes(g.id);
-      return `<label class="pool-item ${on ? 'on' : ''}">
-        <input type="checkbox" data-id="${g.id}" ${on ? 'checked' : ''} ${isHost ? '' : 'disabled'}>
-        <span class="pi">${g.icon}</span><span class="pn">${esc(g.name)}</span><small>${BrawlBox.timeOf(g, room.players)}s</small>
-      </label>`;
-    }).join('');
-
-    const ok = ids.length >= MIN_PLAYERS && allReady && pool.length > 0;
-    $('btn-start').disabled = !ok;
+    $('btn-start').disabled = !canStart();
 
     let hint;
     if (!isHost) hint = me.ready ? 'Waiting for the leader to start…' : 'Tap "I\'m ready!" when you are set';
     else if (ids.length < MIN_PLAYERS) hint = `Need at least ${MIN_PLAYERS} players to start`;
-    else if (!allReady) hint = 'Waiting for everyone to be ready';
+    else if (!allReady()) hint = 'Waiting for everyone to be ready';
     else if (!pool.length) hint = 'Pick at least one game';
-    else hint = `Everyone is ready! ${pool.length} games in the pool, ${room.rounds} rounds`;
+    else hint = 'Everyone is ready! Press Start to set the rounds';
     $('lobby-hint').textContent = hint;
   }
 
-  $('pool-list').addEventListener('change', () => {
-    if (!room || room.hostId !== uid) return;
-    const pool = [...$('pool-list').querySelectorAll('input:checked')].map(i => i.dataset.id);
-    DB.update(`rooms/${code}`, cur => cur && {
-      ...cur, pool,
-      rounds: Math.min(cur.rounds, cur.replay ? MAX_ROUNDS : Math.max(1, pool.length)),
-    });
+  // Screen timers: the leader edits them, everyone sees them
+  Object.entries(TIMER_INPUTS).forEach(([key, id]) => {
+    $(id).onchange = e => {
+      if (!room || room.hostId !== uid) return;
+      const v = clampTimer(e.target.value, TIMES[key]);
+      e.target.value = v;
+      DB.set(`rooms/${code}/timers/${key}`, v);
+    };
   });
 
-  const setRounds = n => {
-    if (room?.hostId === uid) DB.set(`rooms/${code}/rounds`, Math.min(maxRounds(room), Math.max(1, n)));
+  /* ---------- GAME PICKER (popup) ---------- */
+  let pickSel = new Set();
+  function openPicker() {
+    pickSel = new Set(poolOf(room));
+    $('picker-grid').innerHTML = BrawlBox.catalog.reverse().map(g => `
+      <button class="pk-card" data-id="${g.id}">
+        ${BrawlBox.visual(g, BrawlBox.timeOf(g, room.players))}
+        <span class="pk-row">
+          <span class="pk-name">${esc(g.name)}</span>
+          <span class="pk-check">✓</span>
+        </span>
+      </button>`).join('');
+    paintPicker();
+    $('picker').classList.remove('hidden');
+  }
+  function paintPicker() {
+    $('picker-grid').querySelectorAll('.pk-card').forEach(b => b.classList.toggle('on', pickSel.has(b.dataset.id)));
+    $('picker-count').textContent = `${pickSel.size} selected`;
+  }
+  $('picker-grid').onclick = e => {
+    const b = e.target.closest('.pk-card');
+    if (!b) return;
+    const id = b.dataset.id;
+    if (pickSel.has(id)) pickSel.delete(id); else pickSel.add(id);
+    SFX.play('tap');
+    paintPicker();
   };
-  $('rounds-minus').onclick = () => setRounds(room.rounds - 1);
-  $('rounds-plus').onclick = () => setRounds(room.rounds + 1);
-
-  $('replay-check').onchange = e => {
-    if (room?.hostId !== uid) return;
-    const replay = e.target.checked;
-    DB.update(`rooms/${code}`, cur => cur && {
-      ...cur, replay,
-      rounds: Math.min(cur.rounds, replay ? MAX_ROUNDS : Math.max(1, (cur.pool || []).length)),
-    });
-  };
-
-  $('btn-ready').onclick = () => {
-    DB.set(`rooms/${code}/players/${uid}/ready`, !room.players[uid].ready);
-  };
-
-  $('btn-start').onclick = () => {
+  $('btn-pick').onclick = openPicker;
+  $('picker-all').onclick = () => { pickSel = new Set(BrawlBox.catalog.map(g => g.id)); paintPicker(); };
+  $('picker-none').onclick = () => { pickSel.clear(); paintPicker(); };
+  $('picker').onclick = e => { if (e.target.id === 'picker') $('picker').classList.add('hidden'); };
+  $('picker-done').onclick = () => {
     if (!room || room.hostId !== uid) return;
-    const schedule = Picker.schedule(room.pool, room.rounds, !!room.replay);
+    const pool = BrawlBox.catalog.map(g => g.id).filter(id => pickSel.has(id));
+    DB.set(`rooms/${code}/pool`, pool.length ? pool : null);
+    $('picker').classList.add('hidden');
+  };
+
+  /* ---------- START SHEET (rounds are set here, right before the game starts) ---------- */
+  const sheet = { rounds: 0, replay: false };
+  function openStartSheet() {
+    if (!room || room.hostId !== uid || !canStart()) return;
+    sheet.replay = !!room.replay;
+    sheet.rounds = poolOf(room).length;          // default: every picked game once
+    renderSheet();
+    $('start-sheet').classList.remove('hidden');
+  }
+  function renderSheet() {
+    const pool = poolOf(room);
+    const { min, max } = roundBounds(pool, sheet.replay);
+    sheet.rounds = Math.min(max, Math.max(min, sheet.rounds));
+    $('ss-games').innerHTML = pool.map(id => catalogById(id)?.icon || '❔').join(' ') +
+      ` <span class="muted">${plural(pool.length, 'game')}</span>`;
+    $('ss-replay').checked = sheet.replay;
+    $('ss-rounds').textContent = sheet.rounds;
+    $('ss-minus').disabled = sheet.rounds <= min;
+    $('ss-plus').disabled = sheet.rounds >= max;
+    $('ss-note').textContent = sheet.replay
+      ? `Rounds: 1 to ${max}. Games can repeat.`
+      : `Rounds: 1 to ${max}. Each game is played at most once.`;
+  }
+  $('btn-start').onclick = openStartSheet;
+  $('ss-cancel').onclick = () => $('start-sheet').classList.add('hidden');
+  $('ss-replay').onchange = e => { sheet.replay = e.target.checked; renderSheet(); };
+  $('ss-minus').onclick = () => { sheet.rounds--; renderSheet(); };
+  $('ss-plus').onclick = () => { sheet.rounds++; renderSheet(); };
+  $('ss-go').onclick = () => startGame();
+
+  function startGame() {
+    if (!room || room.hostId !== uid || !canStart()) return;
+    const pool = poolOf(room);
+    const { min, max } = roundBounds(pool, sheet.replay);
+    const rounds = Math.min(max, Math.max(min, sheet.rounds));
+    const schedule = Picker.schedule(pool, rounds, sheet.replay);
     const stars = Object.fromEntries(Object.keys(room.players).map(id => [id, 0]));
     const colors = BrawlBox.util.shuffle(PALETTE);
     const players = Object.fromEntries(
       Object.keys(room.players).map((id, i) => [id, { ...room.players[id], color: colors[i % colors.length] }])
     );
-    patchRoom({ phase: 'intro', gameIndex: 0, schedule, results: {}, stars, roundResult: null, phaseDur: TIMES.intro, players, live: null });
-  };
+    closeSheets();
+    patchRoom({
+      phase: 'intro', replay: sheet.replay, rounds, gameIndex: 0, schedule,
+      results: {}, stars, roundResult: null, phaseDur: timerOf(room, 'intro'),
+      players, live: null,
+    });
+  }
 
   // Host-only writes that also reset the phase clock.
   function patchRoom(obj) {
@@ -241,6 +317,13 @@
         ? { ...cur, phaseStart: Date.now(), ...obj }
         : undefined);
   }
+
+  /* ---------- TIMER SOUND TOGGLE ---------- */
+  const paintSound = () => {
+    $('btn-sound').textContent = SFX.timerOn ? '🔔 Timer sound: On' : '🔕 Timer sound: Off';
+  };
+  $('btn-sound').onclick = () => { SFX.setTimerSound(!SFX.timerOn); paintSound(); };
+  paintSound();
 
   /* ---------- INTRO (next game info) ---------- */
   function renderIntro() {
@@ -265,6 +348,7 @@
     const stage = $('play-stage');
     $('hud-name').textContent = `${entry.icon} ${entry.name}`;
     $('hud-time').textContent = `${entry.time}s`;
+    $('hud-time').classList.remove('urgent');
     $('play-wait').classList.add('hidden');
     showScreen('play');
 
@@ -276,10 +360,17 @@
     if (room.live?.[gi]?.scores?.[uid] === undefined) saveScore(gi, 0);
 
     stage.innerHTML = '<p class="g-sub">Loading game…</p>';
+    let lastSec = -1;                            // onTick fires 5x a second; only act when the number changes
     let run;
     try {
       run = await runGame(entry, stage, {
-        onTick: s => { $('hud-time').textContent = `${s}s`; },
+        onTick: s => {
+          if (s === lastSec) return;
+          lastSec = s;
+          $('hud-time').textContent = `${s}s`;
+          setUrgent($('hud-time'), s);
+          SFX.timerTick(s);
+        },
         onScore: n => { $('hud-score').textContent = n; saveScore(gi, n); },
         onFinish: score => {
           if (runIndex !== gi) return;      // stopped by a phase change, not a real finish
@@ -299,6 +390,18 @@
   function showWait(score) {
     $('wait-score').textContent = score;
     $('play-wait').classList.remove('hidden');
+    renderWait(room.gameIndex);
+  }
+
+  // "Collecting results" panel: who has sent their score so far
+  function renderWait(gi) {
+    const ids = Object.keys(room.players);
+    const done = room.live?.[gi]?.finished || {};
+    const count = ids.filter(id => done[id]).length;
+    $('wait-count').textContent = `${count} of ${ids.length} players done`;
+    $('wait-pips').innerHTML = ids.map(id =>
+      `<span class="cr-pip ${done[id] ? 'done' : ''}">${done[id] ? '✅' : '⏳'} ${esc(room.players[id].name)}${id === uid ? ' (you)' : ''}</span>`
+    ).join('');
   }
 
   function stopRun() {
@@ -360,10 +463,13 @@
     });
 
     box.style.height = Math.max(0, ids.length * ROW_STEP - 8) + 'px';
+
+    // Keep the "collecting results" panel up to date while it is open
+    if (!$('play-wait').classList.contains('hidden')) renderWait(gi);
   }
 
   /* ---------- ROUND RESULT ---------- */
-    function renderResult() {
+  function renderResult() {
     const gi = room.gameIndex, g = catalogById(room.schedule[gi]);
     const rr = room.roundResult || {};
     const order = rr.order || [];
@@ -390,7 +496,10 @@
 
   function renderStandings() {
     const gi = room.gameIndex, stars = room.stars || {};
-    $('stand-progress').textContent = `After game ${gi + 1} of ${room.schedule.length}`;
+    const inQueue = room.schedule.length - (gi + 1);   // games still to play after this one
+    $('stand-progress').innerHTML = inQueue > 0
+      ? `Games in queue: <b class="q-num">${inQueue}</b>`
+      : `Games in queue: <b class="q-done">done</b>`;
     const ids = sortedIds();
     const ranks = denseRanks(ids, id => stars[id] || 0);
     $('stand-list').innerHTML = ids.map((id, i) => `<li class="rank r${Math.min(ranks[i], 3)}">
@@ -407,9 +516,9 @@
     const winners = ids.filter(id => (stars[id] || 0) === top);
     $('final-winner').innerHTML = `<div class="champ">${winners.map(id => esc(room.players[id].name)).join(' & ')}</div>
       <p class="muted">${top} ⭐ stars</p>`;
-    
+
     const ranks = denseRanks(ids, id => stars[id] || 0);
-      $('final-list').innerHTML = ids.map((id, i) => `<li class="rank r${Math.min(ranks[i], 3)}">
+    $('final-list').innerHTML = ids.map((id, i) => `<li class="rank r${Math.min(ranks[i], 3)}">
       <span class="pos">${ranks[i]}</span>
       <span class="rname">${esc(room.players[id].name)}${id === uid ? ' <small>(you)</small>' : ''}</span>
       <span class="rstars">⭐ ${stars[id] || 0}</span>
@@ -429,7 +538,7 @@
   };
 
   /* ---------- HOST TIMER (only the leader's tab drives phases) ---------- */
-    function finishRound(r) {
+  function finishRound(r) {
     const gi = r.gameIndex;
     const scores = r.live?.[gi]?.scores || {};
     const ids = Object.keys(r.players);
@@ -453,33 +562,41 @@
     const stars = { ...(r.stars || {}) };
     ids.forEach(id => { stars[id] = (stars[id] || 0) + (awarded[id] || 0); });
 
-    patchRoomIf('playing', r.phaseStart, { phase: 'results', phaseDur: TIMES.result, roundResult: { order, awarded }, stars });
+    patchRoomIf('playing', r.phaseStart, {
+      phase: 'results', phaseDur: timerOf(r, 'result'), roundResult: { order, awarded }, stars,
+    });
   }
 
   function hostTick(r) {
     const el = (Date.now() - r.phaseStart) / 1000;
 
-    if (r.phase === 'intro' && el >= TIMES.intro) {
+    if (r.phase === 'intro' && el >= r.phaseDur) {
       return patchRoomIf('intro', r.phaseStart, { phase: 'playing', phaseDur: gameTime(r, r.gameIndex) });
     }
     if (r.phase === 'playing' && el >= r.phaseDur + GRACE) return finishRound(r);
-    if (r.phase === 'results' && el >= TIMES.result) {
-      return patchRoomIf('results', r.phaseStart, { phase: 'standings', phaseDur: TIMES.standings });
+    if (r.phase === 'results' && el >= r.phaseDur) {
+      return patchRoomIf('results', r.phaseStart, { phase: 'standings', phaseDur: timerOf(r, 'standings') });
     }
-    if (r.phase === 'standings' && el >= TIMES.standings) {
+    if (r.phase === 'standings' && el >= r.phaseDur) {
       if (r.gameIndex + 1 < r.schedule.length) {
-        return patchRoomIf('standings', r.phaseStart, { phase: 'intro', gameIndex: r.gameIndex + 1, phaseDur: TIMES.intro });
+        return patchRoomIf('standings', r.phaseStart, { phase: 'intro', gameIndex: r.gameIndex + 1, phaseDur: timerOf(r, 'intro') });
       }
       return patchRoomIf('standings', r.phaseStart, { phase: 'final', phaseDur: 0 });
     }
   }
 
+  // Countdown numbers on the intro, result and standings screens, with the timer tick sound
+  let lastTick = '';
   function updateCountdowns(r) {
     if (!r) return;
+    const id = COUNT_EL[r.phase];
+    if (!id) return;
     const left = Math.max(0, Math.ceil(r.phaseDur - (Date.now() - r.phaseStart) / 1000));
-    if (r.phase === 'intro') $('intro-countdown').textContent = left;
-    if (r.phase === 'results') $('result-countdown').textContent = left;
-    if (r.phase === 'standings') $('stand-countdown').textContent = left;
+    const el = $(id);
+    el.textContent = left;
+    setUrgent(el, left);
+    const key = `${r.phaseStart}:${left}`;
+    if (key !== lastTick) { lastTick = key; SFX.timerTick(left); }
   }
 
   setInterval(() => {

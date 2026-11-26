@@ -12,12 +12,12 @@ const BrawlBox = {
     { id: 'quick-math',       name: 'Brain Blitz',    icon: '🧮', rule: 'Solve as many sums as you can!', time: 30 },
     { id: 'stroop',           name: 'Color Clash',    icon: '🎨', rule: 'Tap the INK color, not the word!', time: 25 },
     { id: 'whack-a-mole',     name: 'Mole Whack',     icon: '🔨', rule: 'Whack every mole that pops up!', time: 25 },
-    { id: 'tiles-claim',      name: 'Tile Grab',      icon: '🟦', rule: 'Tap any tile to take it, even from others!', time: 20 },
+    { id: 'tiles-claim',      name: 'Tile Grab',      icon: '🟦', rule: 'Tap any tile to take it, even from others!', time: 20, hot: true },
     { id: 'catch-falling',    name: 'Catch It',       icon: '🧺', rule: 'Tap the good items, avoid the bombs!', time: 25 },
     { id: 'pattern-copy',     name: 'Pattern Copy',   icon: '🧩', rule: 'Watch the tiles light up, then tap them in order.', time: 30 },
     { id: 'trivia-buzz',      name: 'Trivia Buzz',    icon: '💡', rule: 'Answer fast! Quicker correct answers score more.', time: 25 },
     { id: 'balloon-pump',     name: 'Balloon Pump',   icon: '🎈', rule: 'Hold to inflate. Let go before it pops!', time: 25 },
-    { id: 'speed-typing',     name: 'Speed Typing',   icon: '⌨️', rule: 'Type the sentence as fast as you can!', time: 20 },
+    { id: 'speed-typing',     name: 'Speed Typing',   icon: '⌨️', rule: 'Type the sentence as fast as you can!', time: 20 , hot: true},
     { id: 'precision-timing', name: 'Perfect Stop',   icon: '🎯', rule: 'Stop the marker inside the green zone!', time: 25 },
     { id: 'stamina',          name: 'Sprint Stamina', icon: '🏃', rule: 'Tap to push! Pause to catch your breath.', time: 20 },
     { id: 'bouncing-ball',    name: 'Bouncing Ball',  icon: '🏀', rule: 'Tap when the ball is low to keep it bouncing!', time: 25 },
@@ -26,16 +26,17 @@ const BrawlBox = {
     { id: 'orbit-tap',      name: 'Orbit Tap',     icon: '🌀', rule: 'Tap to flip the bar. Tap on a green arc to score!', time: 25 },
     { id: 'lane-dash',      name: 'Lane Dash',     icon: '🏁', rule: 'Drag your car across 3 lanes. Dodge the traffic!', time: 30 },
     { id: 'box-heist',      name: 'Box Heist',     icon: '💰', rule: 'Grab gems from the pile or steal from other boxes!', time: 25 },
-    { id: 'knight-hop',     name: 'Knight Hop',    icon: '♞',  rule: 'Jump like a chess knight. Never reuse a square!', time: 30 },
+    { id: 'knight-hop',     name: 'Knight Hop',    icon: '♞',  rule: 'Jump like a chess knight. Never reuse a square!', time: 30, hot: true },
+
     //{ id: 'word-chain',     name: 'Word Chain',    icon: '🔗', rule: 'Start your word with the last letter of the last word!', time: 40 },
     //{ id: 'unique-answer',  name: 'Unique Answer', icon: '💬', rule: 'Name answers nobody else gave!', time: 30 },
     //{ id: 'letter-grab',    name: 'Letter Grab',   icon: '🔤', rule: 'Drag across letters to spell words. Longer words, more points!', time: 45 },
     
-    { id: 'red-light',    name: 'Red Light',     icon: '🚦', rule: 'Hold to run on GREEN. Let go on RED, or you are out!', time: 40 },
-    { id: 'tower-rush',   name: 'Tower Rush',    icon: '🪨', rule: 'Tap to drop rocks on your tower. Tallest tower wins!', time: 30 },
-    { id: 'box-stack',    name: 'Box Stack',     icon: '📦', rule: 'Drag falling boxes onto your tower. Build as high as you can!', time: 40 },
-    { id: 'memory-floor', name: 'Memory Floor',  icon: '🧠', rule: 'Memorize the lit tiles, then tap them. Get them all right!', time: 40 },
-    { id: 'star-maze',    name: 'Star Maze',     icon: '⭐', rule: 'Race through the maze and grab stars. Faster means more points!', time: 45 },
+    { id: 'red-light',    name: 'Red Light',     icon: '🚦', rule: 'Hold to run on GREEN. Let go on RED, or you are out!', time: 40, isNew: true, hot: true },
+    { id: 'tower-rush',   name: 'Tower Rush',    icon: '🪨', rule: 'Tap to drop rocks on your tower. Tallest tower wins!', time: 30, isNew: true, hot: true },
+    { id: 'box-stack',    name: 'Box Stack',     icon: '📦', rule: 'Drag falling boxes onto your tower. Build as high as you can!', time: 40, isNew: true, hot: true },
+    { id: 'memory-floor', name: 'Memory Floor',  icon: '🧠', rule: 'Memorize the lit tiles, then tap them. Get them all right!', time: 40 , isNew: true, hot: true},
+    { id: 'star-maze',    name: 'Star Maze',     icon: '⭐', rule: 'Race through the maze and grab stars. Faster means more points!', time: 45, isNew: true, hot: true},
   ],
 
   util: {
@@ -53,6 +54,19 @@ const BrawlBox = {
 
 // Resolves a catalog entry's time for a given set of players (seconds).
 BrawlBox.timeOf = (g, players) => typeof g.time === 'function' ? g.time(players || {}) : g.time;
+// Game image with icon fallback, HOT and NEW stickers, and an optional time panel.
+// Image is images/<id>.png unless the catalog entry sets `image`.
+// If the file is missing, the icon shows instead.
+// Pass seconds to show the time panel (pass nothing to hide it).
+BrawlBox.visual = (g, seconds) => `<span class="gv">
+  <span class="gv-icon">${g.icon}</span>
+  <img src="${g.image || `images/${g.id}.png`}" alt="" loading="lazy" onload="this.classList.add('ok')" onerror="this.remove()">
+  ${g.hot ? '<span class="stk hot">🔥 HOT</span>' : ''}
+  ${g.isNew ? '<span class="stk new">NEW</span>' : ''}
+  ${seconds != null ? `<span class="gv-time">${seconds}s</span>` : ''}
+</span>`;
+// NEW and HOT tags come from the catalog flags `isNew` and `hot`.
+BrawlBox.badges = g => `${g.isNew ? '<span class="badge new">NEW</span>' : ''}${g.hot ? '<span class="badge hot">🔥 HOT</span>' : ''}`;
 
 // Auction House timing. Milliseconds per item, seconds for the whole game.
 BrawlBox.auction = {
@@ -67,6 +81,12 @@ BrawlBox.auction = {
 /* ---------- SFX (synthesized, no audio files) ---------- */
 const SFX = {
   ctx: null,
+  WARN_S: 5,                                                // timer flashes and ticks in the last this-many seconds
+  timerOn: localStorage.getItem('bb_timer_sound') !== 'off', // timer tick on/off, remembered on this device
+  setTimerSound(on) {
+    this.timerOn = !!on;
+    localStorage.setItem('bb_timer_sound', this.timerOn ? 'on' : 'off');
+  },
   ctxGet() {
     if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     if (this.ctx.state === 'suspended') this.ctx.resume();
@@ -85,6 +105,11 @@ const SFX = {
     o.connect(g).connect(c.destination);
     o.start(t);
     o.stop(t + dur + 0.05);
+  },
+  // Short click for the last seconds of a timer. The final second is higher pitched.
+  timerTick(secondsLeft) {
+    if (!this.timerOn || secondsLeft <= 0 || secondsLeft > this.WARN_S) return;
+    try { this.tone(secondsLeft === 1 ? 1100 : 820, 0, 0.06, 'square'); } catch (e) {}
   },
   play(name) {
     try {
@@ -113,14 +138,14 @@ const VFX = {
     const loop = () => { this.frame(); requestAnimationFrame(loop); };
     loop();
   },
-  burst(x, y, n = 40) {
+  burst(x, y, n = 10) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2, s = Math.random() * 8 + 2;
-      this.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 3, life: 1,
+      this.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 3, life: .4,
         size: Math.random() * 8 + 4, color: `hsl(${Math.random() * 360} 90% 60%)` });
     }
   },
-  confetti(n = 140) {
+  confetti(n = 40) {
     for (let i = 0; i < n; i++) {
       this.parts.push({ x: Math.random() * innerWidth, y: -20, vx: (Math.random() - 0.5) * 3,
         vy: Math.random() * 3 + 2, life: 1.6, size: Math.random() * 10 + 5,
