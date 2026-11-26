@@ -4,7 +4,7 @@
   VFX.init();
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  BrawlBox.catalog.reverse().forEach(g => {
+  [...BrawlBox.catalog].reverse().forEach(g => {
     const b = document.createElement('button');
     b.className = 'menu-card';
     b.innerHTML = `${BrawlBox.visual(g, BrawlBox.timeOf(g, { me: {} }))}

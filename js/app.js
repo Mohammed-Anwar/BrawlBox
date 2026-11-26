@@ -219,7 +219,7 @@
   let pickSel = new Set();
   function openPicker() {
     pickSel = new Set(poolOf(room));
-    $('picker-grid').innerHTML = BrawlBox.catalog.reverse().map(g => `
+    $('picker-grid').innerHTML = [...BrawlBox.catalog].reverse().map(g => `
       <button class="pk-card" data-id="${g.id}">
         ${BrawlBox.visual(g, BrawlBox.timeOf(g, room.players))}
         <span class="pk-row">
